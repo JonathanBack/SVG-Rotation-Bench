@@ -56,7 +56,7 @@ conda activate svg-rotation-bench
 The simulation scripts require the following R packages:
 
 ```
-Seurat, SingleCellExperiment, scDesign3, scales, ggplot2, cowplot, dplyr, glue
+Seurat, SingleCellExperiment, scDesign3, scales, ggplot2, cowplot, dplyr, glue, SPARK
 ```
 
 ## Stage 1: Simulation (`src/01_simulation/`)
@@ -92,7 +92,10 @@ Rotation is centered on the tissue's center of mass to preserve the overall spat
 
 ## Stage 3: Benchmark (`src/03_benchmark/`)
 
-Each SVG detection method is run on each rotated `.h5ad` file. Results are collected per method and per rotation angle.
+Each SVG detection method is implemented as a standalone script under `scripts/`. Each script reads the `.h5ad` or CSV files from Stage 2 and runs the method across all four rotation angles. Raw outputs (p-values, test statistics per gene) are saved to `outputs/{method}/`.
+
+**Scripts:**
+- `scripts/run_sparkx.R` — SPARK-X non-parametric covariance test per angle.
 
 ## Stage 4: Metrics (`src/04_metrics/`)
 
