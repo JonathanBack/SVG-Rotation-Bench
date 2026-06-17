@@ -14,10 +14,11 @@ counts <- counts[!duplicated(rownames(counts)), ]
 angles_degrees <- c(0, 30, 45, 60)
 
 for (angle in angles_degrees) {
-  output_file <- file.path(output_dir, paste0("scdesign3_angle", angle, ".csv"))
+  rds_file <- file.path(output_dir, paste0("scdesign3_angle", angle, "_results.rds"))
+  runtime_file <- file.path(output_dir, paste0("scdesign3_angle", angle, "_runtime.csv"))
 
-  if (file.exists(output_file)) {
-    message("Skipping angle ", angle, " -- output already exists: ", output_file)
+  if (file.exists(rds_file) && file.exists(runtime_file)) {
+    message("Skipping angle ", angle, " -- outputs already exist")
     next
   }
 
@@ -27,18 +28,18 @@ for (angle in angles_degrees) {
   locations <- read.csv(location_file, row.names = 1, check.names = FALSE)
   locs <- as.matrix(locations[colnames(counts), c("spatial1", "spatial2")])
 
+  t_start <- proc.time()
   result <- sparkx(counts, locs, numCores = 1, option = "mixture")
+  elapsed <- proc.time() - t_start
 
-  df_out <- data.frame(
-    gene = rownames(result$res_mtest),
-    combined_pval = result$res_mtest[, 1],
-    adjusted_pval_BY = result$res_mtest[, 2],
-    row.names = NULL,
-    check.names = FALSE
+  saveRDS(result, rds_file)
+  write.csv(
+    data.frame(angle = angle, elapsed_sec = unname(elapsed["elapsed"])),
+    runtime_file,
+    row.names = FALSE
   )
-  write.csv(df_out, output_file, row.names = FALSE)
 
-  message("Saved ", output_file)
+  message("Saved ", rds_file, " (", round(elapsed["elapsed"], 1), "s)")
 }
 
 message("SPARK-X benchmark complete.")
