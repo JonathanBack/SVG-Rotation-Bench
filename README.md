@@ -69,7 +69,8 @@ Realistic synthetic data is generated using `scDesign3`, fitted on the **10x Vis
   $\mu(s) = \alpha \cdot \mu_s(s) + (1 - \alpha) \cdot \mu_{ns}(s)$
 
 **Scripts:**
-- `scripts/run_scdesign3.R` — Runs scDesign3 fitting and simulation. Outputs `counts.csv` (300 features: 50 genes × 6 alpha levels) and `location.csv` (2696 spots with spatial coordinates) to `outputs/scDesign3/data/`. Diagnostic plots saved to `outputs/scDesign3/figures/`.
+- `scripts/run_scdesign3_fit.R` — Runs scDesign3 fitting (GP marginal models + Gaussian copula) and saves fitted parameters to `outputs/scDesign3/data/scdesign3_fitted.rds`. Runs once; also generates diagnostic plots.
+- `scripts/run_scdesign3_sweep.R` — Loads the fitted parameters and generates the alpha-sweep count matrix at 21 mixing levels (0.00–1.00 in 0.05 steps). Outputs `counts.csv` (1050 features: 50 genes × 21 alpha levels) and `location.csv` (2696 spots) to `outputs/scDesign3/data/`.
 
 ## Stage 2: Rotation (`src/02_rotation/`)
 
@@ -99,7 +100,13 @@ Each SVG detection method is implemented as a standalone script under `scripts/`
 
 ## Stage 4: Metrics (`src/04_metrics/`)
 
-Performance is evaluated using the following metrics:
-- **Classification Accuracy:** Area under the Precision-Recall curve (**auPRC**) for classifying true SVGs vs. non-SVGs.
-- **Ranking Accuracy:** **Kendall's rank correlation coefficient ($\tau$)** to evaluate the biological prioritization of genes.
-- **Computational Scalability:** Peak RAM usage (GB) and total running time.
+Raw benchmark outputs from Stage 3 are evaluated using classification and ranking metrics across rotation angles.
+
+**Scripts:**
+- `scripts/compute_metrics.R` — Reads `.rds` results per method/angle, computes auPRC (binary SVG classification, alpha>0 vs alpha=0), Kendall's τ_alpha (alpha vs score ranking), and τ_rotation (cross-angle score consistency). Outputs CSVs and diagnostic plots.
+
+**Metrics:**
+- **auPRC:** Area under the Precision-Recall curve for classifying true SVGs vs. non-SVGs.
+- **Kendall's τ_alpha:** Rank correlation between signal strength (alpha) and method score.
+- **Kendall's τ_rotation:** Rank correlation of scores between rotation angles — measures rotation invariance.
+- **Runtime:** Wall-clock time per angle (seconds).
