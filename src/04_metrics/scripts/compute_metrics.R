@@ -2,8 +2,10 @@ library(ggplot2)
 
 project_root <- normalizePath(getwd(), winslash = "/", mustWork = TRUE)
 
-benchmark_dir <- file.path(project_root, "src", "03_benchmark", "outputs", "sparkx")
-output_dir <- file.path(project_root, "src", "04_metrics", "outputs")
+tool <- "sparkx"
+
+benchmark_dir <- file.path(project_root, "src", "03_benchmark", "outputs", tool)
+output_dir <- file.path(project_root, "src", "04_metrics", "outputs", tool)
 figures_dir <- file.path(output_dir, "figures")
 
 dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
@@ -112,61 +114,92 @@ print(rotation_tau)
 all_data <- do.call(rbind, per_angle_data)
 all_data$angle <- factor(all_data$angle, levels = as.character(angles))
 
-p_metrics <- ggplot(metrics, aes(x = angle)) +
-  geom_line(aes(y = auprc, group = 1), color = "#0072B2", linewidth = 1) +
-  geom_point(aes(y = auprc), color = "#0072B2", size = 3) +
-  geom_line(aes(y = tau_alpha + 1, group = 1), color = "#D55E00", linewidth = 1) +
-  geom_point(aes(y = tau_alpha + 1), color = "#D55E00", size = 3) +
-  scale_y_continuous(
-    name = "auPRC",
-    limits = c(0, 2),
-    breaks = seq(0, 1, 0.25),
-    sec.axis = sec_axis(transform = ~ . - 1, name = expression(tau[alpha]),
-                         breaks = seq(-1, 1, 0.5))
-  ) +
-  labs(x = "Rotation angle", title = "SPARK-X: auPRC and \u03c4\u03b1 vs. Rotation Angle") +
-  theme_minimal()
-
-ggsave(file.path(figures_dir, "sparkx_metrics.png"), p_metrics, width = 6, height = 4, dpi = 150)
-
-p_density <- ggplot(all_data, aes(x = score, fill = angle, color = angle)) +
-  geom_density(alpha = 0.25, linewidth = 0.5) +
+p_auprc <- ggplot(metrics, aes(x = angle, y = auprc)) +
+  geom_line(group = 1, color = "#0072B2", linewidth = 1) +
+  geom_point(color = "#0072B2", size = 3) +
   labs(
-    x = "score (-adjusted P-value)",
-    y = "Density",
-    title = "SPARK-X: Score Distribution by Rotation Angle"
+    x = "Rotation angle (degrees)",
+    y = "auPRC",
+    title = paste0(toupper(tool), ": auPRC vs Rotation Angle"),
+    subtitle = "Area under Precision-Recall curve for detecting rotated SV genes"
   ) +
   theme_minimal()
 
-ggsave(file.path(figures_dir, "sparkx_score_density.png"), p_density, width = 6, height = 4, dpi = 150)
+ggsave(file.path(figures_dir, paste0(tool, "_auprc.png")), p_auprc, width = 6, height = 4, dpi = 150)
 
-pair_0_60 <- all_data[all_data$angle %in% c("0", "60"), ]
-pair_0 <- pair_0_60[pair_0_60$angle == "0", ]
-pair_60 <- pair_0_60[pair_0_60$angle == "60", ]
-rownames(pair_0) <- pair_0$feature
-rownames(pair_60) <- pair_60$feature
-common_features <- intersect(pair_0$feature, pair_60$feature)
+p_tau <- ggplot(metrics, aes(x = angle, y = tau_alpha)) +
+  geom_line(group = 1, color = "#D55E00", linewidth = 1) +
+  geom_point(color = "#D55E00", size = 3) +
+  labs(
+    x = "Rotation angle (degrees)",
+    y = expression(tau[alpha]),
+    title = substitute(TOOL ~ ": " * tau[alpha] ~ "vs Rotation Angle", list(TOOL = toupper(tool))),
+    subtitle = expression(Kendall ~ tau ~ "between true signal fraction" ~ alpha ~ "and score")
+  ) +
+  theme_minimal()
 
-df_scatter <- data.frame(
-  feature = common_features,
-  score_0 = pair_0[common_features, "score"],
-  score_60 = pair_60[common_features, "score"],
-  stringsAsFactors = FALSE
-)
+ggsave(file.path(figures_dir, paste0(tool, "_tau.png")), p_tau, width = 6, height = 4, dpi = 150)
 
-lims <- range(c(df_scatter$score_0, df_scatter$score_60))
+pairwise_df <- lapply(pairs, function(pair) {
+  a <- pair[1]; b <- pair[2]
+  da <- per_angle_data[[a]]
+  db <- per_angle_data[[b]]
+  rownames(da) <- da$feature
+  rownames(db) <- db$feature
+  common <- intersect(da$feature, db$feature)
+  tau <- rotation_tau[rotation_tau$angle_a == as.numeric(a) &
+                      rotation_tau$angle_b == as.numeric(b), "tau_rotation"]
+  data.frame(
+    feature = common,
+    score_a = da[common, "score"],
+    score_b = db[common, "score"],
+    angle_a = a,
+    angle_b = b,
+    tau_rotation = tau,
+    label = paste0(a, "\u00b0 vs ", b, "\u00b0\n\u03c4 = ", round(tau, 3)),
+    stringsAsFactors = FALSE
+  )
+})
 
-p_scatter <- ggplot(df_scatter, aes(x = score_0, y = score_60)) +
+all_pairs_df <- do.call(rbind, pairwise_df)
+all_pairs_df$label <- factor(all_pairs_df$label, levels = unique(all_pairs_df$label))
+
+lims_global <- range(c(all_pairs_df$score_a, all_pairs_df$score_b))
+
+for (pair in pairs) {
+  a <- pair[1]; b <- pair[2]
+  sub <- all_pairs_df[all_pairs_df$angle_a == a & all_pairs_df$angle_b == b, ]
+  tau <- sub$tau_rotation[1]
+  lims <- range(c(sub$score_a, sub$score_b))
+
+  p <- ggplot(sub, aes(x = score_a, y = score_b)) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray50") +
+    geom_point(alpha = 0.5, size = 1.5, color = "#0072B2") +
+    coord_fixed(xlim = lims, ylim = lims) +
+    labs(
+      x = paste0("Score (\u2212adjusted p-value) at ", a, "\u00b0"),
+      y = paste0("Score (\u2212adjusted p-value) at ", b, "\u00b0"),
+      title = paste0(toupper(tool), ": Score Comparison ", a, "\u00b0 vs ", b, "\u00b0"),
+      subtitle = paste0("Kendall \u03c4 = ", round(tau, 3))
+    ) +
+    theme_minimal()
+
+  ggsave(file.path(figures_dir, paste0(tool, "_scatter_", a, "_vs_", b, ".png")),
+         p, width = 5, height = 5, dpi = 150)
+}
+
+p_facet <- ggplot(all_pairs_df, aes(x = score_a, y = score_b)) +
   geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray50") +
-  geom_point(alpha = 0.5, size = 1.5, color = "#0072B2") +
-  coord_fixed(xlim = lims, ylim = lims) +
+  geom_point(alpha = 0.5, size = 0.8, color = "#0072B2") +
+  facet_wrap(~ label, ncol = 3) +
+  coord_fixed(xlim = lims_global, ylim = lims_global) +
   labs(
-    x = "score at 0\u00b0",
-    y = "score at 60\u00b0",
-    title = "SPARK-X: Score Comparison 0\u00b0 vs 60\u00b0"
+    x = "Score (\u2212adjusted p-value) at first angle",
+    y = "Score (\u2212adjusted p-value) at second angle",
+    title = paste0(toupper(tool), ": Pairwise Score Comparisons Across Rotation Angles")
   ) +
   theme_minimal()
 
-ggsave(file.path(figures_dir, "sparkx_pairwise_scatter.png"), p_scatter, width = 5, height = 5, dpi = 150)
+ggsave(file.path(figures_dir, paste0(tool, "_scatter_facet.png")), p_facet, width = 10, height = 7, dpi = 150)
 
 cat("\nPlots saved to", figures_dir, "\n")
