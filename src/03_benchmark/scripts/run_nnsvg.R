@@ -52,11 +52,8 @@ for (angle in angles_degrees) {
   spe <- nnSVG(spe, n_threads = 5)
   elapsed <- proc.time() - t_start
 
-  df <- rowData(spe)
-  result <- list(res_mtest = data.frame(
-    adjustedPval = df$padj,
-    row.names = rownames(df)
-  ))
+  df <- as.data.frame(rowData(spe))
+  result <- list(res_mtest = df)
 
   saveRDS(result, rds_file)
   write.csv(

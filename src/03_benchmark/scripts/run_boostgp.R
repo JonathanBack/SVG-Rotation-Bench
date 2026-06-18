@@ -40,10 +40,8 @@ for (angle in angles_degrees) {
   result <- boost.gp(Y = counts, loc = loc, iter = 100, burn = 50)
   elapsed <- proc.time() - t_start
 
-  result_list <- list(res_mtest = data.frame(
-    adjustedPval = p.adjust(result$pval, method = "BH"),
-    row.names = rownames(result)
-  ))
+  result$PPI[is.na(result$PPI)] <- 0
+  result_list <- list(res_mtest = result)
 
   saveRDS(result_list, rds_file)
   write.csv(

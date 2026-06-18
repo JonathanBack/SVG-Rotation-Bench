@@ -21,14 +21,14 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 ANGLES = [0, 30, 45, 60]
 
 
-def save_rds(features, adjusted_pvals, rds_path):
-    pvals_csv = rds_path.replace(".rds", "_tmp_pvals.csv")
-    df = pd.DataFrame({"feature": features, "adjusted_pval": adjusted_pvals})
+def save_rds(df, rds_path):
+    pvals_csv = rds_path.replace(".rds", "_tmp.csv")
     df.to_csv(pvals_csv, index=False)
     r_code = (
         'df <- read.csv("' + pvals_csv + '");'
-        'result <- list(res_mtest = data.frame('
-        'adjustedPval = df$adjusted_pval, row.names = df$feature));'
+        'rownames(df) <- df$feature;'
+        'df$feature <- NULL;'
+        'result <- list(res_mtest = df);'
         'saveRDS(result, "' + rds_path + '")'
     )
     subprocess.run(["Rscript", "-e", r_code], check=True)
@@ -63,10 +63,7 @@ for angle in ANGLES:
     df_res[["gene", "spatial_var"]] = adata.var[["gene", "spatial_var"]]
     df_res.to_csv(results_csv)
 
-    features = list(df_res.index)
-    adjusted_pvals = list(df_res["pval_norm_fdr_bh"])
-
-    save_rds(features, adjusted_pvals, rds_file)
+    save_rds(df_res.reset_index().rename(columns={df_res.index.name or "": "feature"}), rds_file)
 
     pd.DataFrame({"angle": [angle], "elapsed_sec": [elapsed]}).to_csv(
         runtime_file, index=False

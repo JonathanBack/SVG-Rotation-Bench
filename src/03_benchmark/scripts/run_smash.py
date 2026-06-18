@@ -34,14 +34,14 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 ANGLES = [0, 30, 45, 60]
 
 
-def save_rds(features, adjusted_pvals, rds_path):
-    pvals_csv = rds_path.replace(".rds", "_tmp_pvals.csv")
-    df = pd.DataFrame({"feature": features, "adjusted_pval": adjusted_pvals})
+def save_rds(df, rds_path):
+    pvals_csv = rds_path.replace(".rds", "_tmp.csv")
     df.to_csv(pvals_csv, index=False)
     r_code = (
         'df <- read.csv("' + pvals_csv + '");'
-        'result <- list(res_mtest = data.frame('
-        'adjustedPval = df$adjusted_pval, row.names = df$feature));'
+        'rownames(df) <- df$feature;'
+        'df$feature <- NULL;'
+        'result <- list(res_mtest = df);'
         'saveRDS(result, "' + rds_path + '")'
     )
     subprocess.run(["Rscript", "-e", r_code], check=True)
@@ -88,10 +88,12 @@ for angle in ANGLES:
     smash_df = result["SMASH"]
     smash_df.to_csv(results_csv, index=False)
 
-    features = list(smash_df["Gene"])
     _, adj_pvals, _, _ = multipletests(smash_df["p-val"], method="fdr_bh")
 
-    save_rds(features, list(adj_pvals), rds_file)
+    out_df = smash_df.rename(columns={"Gene": "feature", "p-val": "pval"}).copy()
+    out_df["adjusted_pval"] = adj_pvals
+
+    save_rds(out_df, rds_file)
 
     pd.DataFrame({"angle": [angle], "elapsed_sec": [elapsed]}).to_csv(
         runtime_file, index=False
