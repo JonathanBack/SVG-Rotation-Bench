@@ -10,15 +10,17 @@ This repository provides a systematic benchmarking framework designed to evaluat
 
 ## Scope and Included Methods
 
-We benchmark 4 representative kernel-based methods across two main statistical schools:
+We benchmark 5 representative kernel-based methods across two main statistical schools:
 
 **1. Dependence Tests** (Evaluating global independence between expression and location):
 - **SPARK-X:** Non-parametric covariance test.
+- **Moran's I:** Spatial autocorrelation statistic (via squidpy).
 - **SMASH:** Generalized non-parametric method incorporating distance-based kernels.
 
 **2. Random-Effect Regression** (Modeling spatial variation as a Gaussian Process):
 - **SpatialDE:** Linear mixed model using standard Gaussian Processes (GP).
 - **nnSVG:** Nearest-Neighbor Gaussian Process (NNGP) for linear scalability.
+- **BOOST-GP:** Bayesian hierarchical model with GP-based overdispersion.
 
 ## Pipeline
 
@@ -38,26 +40,140 @@ src/
 │       └── anndata/
 │           ├── data/          # scdesign3_angle{angle}.h5ad
 │           └── figures/       # Verification plots (.png)
-├── 03_benchmark/         # Run SVG detection methods across all rotations
-└── 04_metrics/           # Collect and compare results across methods/rotations
+├── 03_benchmark/              # Run SVG detection methods across all rotations
+│   ├── scripts/               # Per-method benchmark scripts
+│   ├── tools/                 # External tools (BOOST-GP, SMASH)
+│   └── outputs/{method}/      # Raw results per method/angle
+└── 04_metrics/                # Collect and compare results across methods/rotations
+    ├── scripts/
+    └── outputs/
+        ├── comparison/        # Cross-method figures and CSVs
+        └── {method}/          # Per-method figures and CSVs
 ```
 
 ## Setup
 
-### Python environment (conda)
+### 1. Python environment (conda)
+
+The Python-based methods and data conversion scripts require the following environment:
 
 ```bash
 conda env create -f environment.yml
 conda activate svg-rotation-bench
 ```
 
-### R dependencies
+This installs: `numpy`, `scipy`, `pandas`, `matplotlib`, `h5py`, `scikit-learn`, `scikit-image`, `geopandas`, `scanpy`, `squidpy`, `anndata`, `statsmodels`, `tqdm`, plus the PyPI packages `SpatialDE` and `NaiveDE`.
 
-The simulation scripts require the following R packages:
+### 2. R dependencies
 
+The R-based methods and metrics require packages from both **CRAN** and **Bioconductor**.
+
+#### CRAN packages
+
+```r
+install.packages(c(
+  "ggplot2", "reshape2", "RColorBrewer", "patchwork",
+  "cowplot", "dplyr", "scales", "MASS", "ggVennDiagram"
+))
 ```
-Seurat, SingleCellExperiment, scDesign3, scales, ggplot2, cowplot, dplyr, glue, SPARK
+
+#### Bioconductor packages
+
+```r
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install(c(
+  "SingleCellExperiment", "SpatialExperiment", "scran",
+  "nnSVG", "scDesign3", "anndata"
+))
 ```
+
+#### Seurat (CRAN / remotes)
+
+```r
+install.packages("Seurat")
+```
+
+#### SPARK-X (GitHub)
+
+SPARK-X is not available on CRAN or Bioconductor. Install from the authors' GitHub repository:
+
+```r
+if (!requireNamespace("devtools", quietly = TRUE))
+    install.packages("devtools")
+
+devtools::install_github("xzhoulab/SPARK")
+```
+
+> **Note:** `SPARK::sparkx()` is the function used in the benchmark. The package may have additional system dependencies (e.g., a working C++ compiler for Rcpp).
+
+### 3. External tools (manual download)
+
+Two methods require manual cloning/downloading into `src/03_benchmark/tools/`:
+
+#### SMASH
+
+Clone the SMASH repository into the tools directory:
+
+```bash
+cd src/03_benchmark/tools/
+git clone https://github.com/your-org/SMASH.git  # Replace with actual URL
+```
+
+SMASH is imported directly from this local path by `run_smash.py`. It requires `numpy`, `scipy`, `pandas`, `scikit-learn`, and `tqdm` (all provided by the conda environment).
+
+> **Compatibility note:** SMASH uses the deprecated BLAS function `sgemm` which fails with float64 arrays on modern scipy. The benchmark script (`run_smash.py`) includes a monkey-patch to fix this issue automatically.
+
+#### BOOST-GP
+
+Clone the BOOST-GP repository into the tools directory:
+
+```bash
+cd src/03_benchmark/tools/
+git clone https://github.com/your-org/BOOST-GP.git  # Replace with actual URL
+```
+
+The benchmark script (`run_boostgp.R`) sources `R/boost.gp.R` from this directory. BOOST-GP uses MCMC sampling and is **computationally expensive** (~hours per dataset). The benchmark uses `iter=100, burn=50` for feasibility.
+
+### 4. SpatialDE compatibility patch
+
+SpatialDE is unmaintained and incompatible with `scipy >= 1.12` (removed `scipy.misc.derivative` and `scipy.arange`). The benchmark script (`run_spatialde.py`) includes runtime compatibility patches to address these issues. No manual intervention is required.
+
+### 5. Full dependency summary
+
+| Package | Source | Used by | Notes |
+|---------|--------|---------|-------|
+| Python `numpy` | conda | All Python scripts | |
+| Python `scipy` | conda | SpatialDE, SMASH | |
+| Python `pandas` | conda | All Python scripts | |
+| Python `matplotlib` | conda | SMASH | |
+| Python `h5py` | conda | anndata | |
+| Python `scikit-learn` | conda | SMASH | |
+| Python `scanpy` | conda | Moran's I, SpatialDE, SMASH | |
+| Python `squidpy` | conda | Moran's I | |
+| Python `anndata` | conda | All Python scripts | |
+| Python `statsmodels` | conda | SMASH (FDR correction) | |
+| Python `tqdm` | conda | SMASH | |
+| Python `SpatialDE` | pip | SpatialDE | Unmaintained; patched at runtime |
+| Python `NaiveDE` | pip | SpatialDE | Companion to SpatialDE |
+| R `Seurat` | CRAN | Simulation | |
+| R `SingleCellExperiment` | Bioc | Simulation, nnSVG, BOOST-GP | |
+| R `SpatialExperiment` | Bioc | nnSVG | |
+| R `scran` | Bioc | nnSVG | |
+| R `nnSVG` | Bioc | nnSVG | |
+| R `scDesign3` | Bioc | Simulation | |
+| R `anndata` (R pkg) | Bioc | nnSVG, BOOST-GP | R interface to .h5ad files |
+| R `SPARK` | GitHub | SPARK-X | `devtools::install_github("xzhoulab/SPARK")` |
+| R `ggplot2` | CRAN | Metrics, simulation | |
+| R `reshape2` | CRAN | Metrics | |
+| R `RColorBrewer` | CRAN | Metrics | |
+| R `patchwork` | CRAN | Metrics | |
+| R `cowplot` | CRAN | Simulation | |
+| R `dplyr` | CRAN | Simulation | |
+| R `scales` | CRAN | Simulation | |
+| R `MASS` | CRAN | SPARK-X | |
+| R `ggVennDiagram` | CRAN | Metrics (optional) | For Venn diagrams; skip if unavailable |
 
 ## Stage 1: Simulation (`src/01_simulation/`)
 
@@ -97,16 +213,22 @@ Each SVG detection method is implemented as a standalone script under `scripts/`
 
 **Scripts:**
 - `scripts/run_sparkx.R` — SPARK-X non-parametric covariance test per angle.
+- `scripts/run_nnsvg.R` — nnSVG nearest-neighbor Gaussian process per angle.
+- `scripts/run_spatialde.py` — SpatialDE Gaussian process regression per angle.
+- `scripts/run_moransi.py` — Moran's I spatial autocorrelation per angle.
+- `scripts/run_smash.py` — SMASH non-parametric kernel test per angle.
+- `scripts/run_boostgp.R` — BOOST-GP Bayesian GP model per angle (very slow; not run by default).
 
 ## Stage 4: Metrics (`src/04_metrics/`)
 
 Raw benchmark outputs from Stage 3 are evaluated using classification and ranking metrics across rotation angles.
 
 **Scripts:**
-- `scripts/compute_metrics.R` — Reads `.rds` results per method/angle, computes auPRC (binary SVG classification, alpha>0 vs alpha=0), Kendall's τ_alpha (alpha vs score ranking), and τ_rotation (cross-angle score consistency). Outputs CSVs and diagnostic plots.
+- `scripts/compute_all_metrics.R` — Reads `.rds` results per method/angle, computes:
+  - **Threshold-independent:** AUC-ROC, auPRC, Kendall's $\tau_\alpha$ (alpha vs score)
+  - **Rotation invariance:** Kendall's $\tau_{rotation}$ (cross-angle score consistency)
+  - **Classification metrics (adj p < 0.05):** Sensitivity, Specificity, Precision, FDR, F1, MCC, Balanced Accuracy
+  - **Set overlap:** Jaccard index, consistency rate, Venn diagrams
+  - **Classification stability:** Spearman $\rho$ between angle and classification metric
 
-**Metrics:**
-- **auPRC:** Area under the Precision-Recall curve for classifying true SVGs vs. non-SVGs.
-- **Kendall's τ_alpha:** Rank correlation between signal strength (alpha) and method score.
-- **Kendall's τ_rotation:** Rank correlation of scores between rotation angles — measures rotation invariance.
-- **Runtime:** Wall-clock time per angle (seconds).
+Outputs CSVs and publication-ready figures (PNG 300dpi + PDF) to `outputs/comparison/` and `outputs/{method}/`.
