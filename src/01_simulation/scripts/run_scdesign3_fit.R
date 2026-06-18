@@ -6,12 +6,14 @@ library(ggplot2)
 library(cowplot)
 library(dplyr)
 
-data_dir <- file.path("outputs", "scDesign3", "data")
-figures_dir <- file.path("outputs", "scDesign3", "figures")
+project_root <- normalizePath(getwd(), winslash = "/", mustWork = TRUE)
+
+data_dir <- file.path(project_root, "src", "01_simulation", "outputs", "scDesign3", "data")
+figures_dir <- file.path(project_root, "src", "01_simulation", "outputs", "scDesign3", "figures")
 dir.create(data_dir, recursive = TRUE, showWarnings = FALSE)
 dir.create(figures_dir, recursive = TRUE, showWarnings = FALSE)
 
-ref_sce <- readRDS(file.path("data", "VISIUM_sce.rds"))
+ref_sce <- readRDS(file.path(project_root, "data", "VISIUM_sce.rds"))
 
 mt_idx <- grep("mt-", rownames(ref_sce))
 if (length(mt_idx) != 0) {

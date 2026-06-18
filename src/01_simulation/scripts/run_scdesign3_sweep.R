@@ -2,7 +2,9 @@ library(SingleCellExperiment)
 library(scDesign3)
 library(dplyr)
 
-data_dir <- file.path("outputs", "scDesign3", "data")
+project_root <- normalizePath(getwd(), winslash = "/", mustWork = TRUE)
+
+data_dir <- file.path(project_root, "src", "01_simulation", "outputs", "scDesign3", "data")
 dir.create(data_dir, recursive = TRUE, showWarnings = FALSE)
 
 fitted <- readRDS(file.path(data_dir, "scdesign3_fitted.rds"))
