@@ -1,3 +1,11 @@
+# ==============================================================================
+# run_moransi.py
+# Benchmarks Moran's I (via Squidpy) for SVG detection across rotated datasets.
+# For each angle: loads AnnData, builds spatial neighbor graph (Delaunay),
+# runs Moran's I with 100 permutations, and saves results via RDS wrapper.
+# Output: scdesign3_angle{angle}_results.rds and runtime CSV.
+# ==============================================================================
+
 import os
 import sys
 import time
@@ -21,6 +29,8 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 ANGLES = [0, 30, 45, 60]
 
 
+# Helper: save a DataFrame as an R .rds file via CSV round-trip with Rscript.
+# This keeps the output format consistent with R-based benchmark runners.
 def save_rds(df, rds_path):
     pvals_csv = rds_path.replace(".rds", "_tmp.csv")
     df.to_csv(pvals_csv, index=False)
@@ -47,17 +57,21 @@ for angle in ANGLES:
     print(f"Running Moran's I for angle = {angle}")
     sys.stdout.flush()
 
+    # --- Load AnnData with rotated spatial coordinates ---
     h5ad_path = H5AD_TEMPLATE.format(angle=angle)
     adata = sc.read_h5ad(h5ad_path)
 
+    # Build spatial neighbor graph using Delaunay triangulation
     sq.gr.spatial_neighbors(adata, coord_type="generic", delaunay=True)
 
+    # --- Run Moran's I with 100 permutations, parallelized over 10 cores ---
     t_start = time.time()
     sq.gr.spatial_autocorr(
         adata, mode="moran", n_perms=100, n_jobs=10, genes=adata.var_names
     )
     elapsed = time.time() - t_start
 
+    # Extract results and attach gene-level metadata from AnnData
     df_res = adata.uns["moranI"]
     df_res = df_res.loc[adata.var_names]
     df_res[["gene", "spatial_var"]] = adata.var[["gene", "spatial_var"]]

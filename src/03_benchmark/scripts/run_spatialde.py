@@ -1,3 +1,12 @@
+# ==============================================================================
+# run_spatialde.py
+# Benchmarks the SpatialDE method for SVG detection across rotated datasets.
+# For each angle: loads AnnData, applies NaiveDE normalization (stabilize +
+# regress out total counts), runs SpatialDE, and saves results via RDS wrapper.
+# Includes SciPy/NumPy compatibility shims for older SpatialDE versions.
+# Output: scdesign3_angle{angle}_results.rds and runtime CSV.
+# ==============================================================================
+
 import os
 import sys
 import time
@@ -12,6 +21,12 @@ import NaiveDE
 import scipy
 import numpy as np
 
+# --- SciPy/NumPy compatibility shims for SpatialDE ---
+# SpatialDE depends on scipy.misc.derivative (removed in scipy 1.10+) and
+# expects certain np namespace objects to be accessible via scipy.*.
+# These patches restore the required API surface.
+
+# Copy all public NumPy symbols into scipy namespace
 for name in dir(np):
     if not name.startswith("_") and not hasattr(scipy, name):
         try:
@@ -19,6 +34,7 @@ for name in dir(np):
         except (TypeError, AttributeError):
             pass
 
+# Replace deprecated scipy.misc.derivative with approx_fprime
 scipy.misc.derivative = (
     lambda func, x0, dx=1.0, n=1, args=(), order=3:
     scipy.optimize.approx_fprime(x0, func, abs(dx), *args)[0]
@@ -40,6 +56,7 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 ANGLES = [0, 30, 45, 60]
 
 
+# Helper: save a DataFrame as an R .rds file via CSV round-trip with Rscript
 def save_rds(df, rds_path):
     pvals_csv = rds_path.replace(".rds", "_tmp.csv")
     df.to_csv(pvals_csv, index=False)
@@ -66,28 +83,37 @@ for angle in ANGLES:
     print(f"Running SpatialDE for angle = {angle}")
     sys.stdout.flush()
 
+    # --- Load AnnData with rotated spatial coordinates ---
     h5ad_path = H5AD_TEMPLATE.format(angle=angle)
     adata = sc.read_h5ad(h5ad_path)
     sc.pp.calculate_qc_metrics(adata, inplace=True, percent_top=[10])
 
+    # Extract count matrix and total counts per cell
     counts = sc.get.obs_df(
         adata, keys=list(adata.var_names), use_raw=False, layer="counts"
     )
     total_counts = sc.get.obs_df(adata, keys=["total_counts"])
 
+    # --- NaiveDE normalization pipeline ---
+    # 1. Variance-stabilizing transformation
+    # 2. Regress out log total_counts to remove library size effects
     t_start = time.time()
     norm_expr = NaiveDE.stabilize(counts.T).T
     resid_expr = NaiveDE.regress_out(
         total_counts, norm_expr.T, "np.log(total_counts)"
     ).T
+
+    # --- Run SpatialDE on the residual expression ---
     df_res = SpatialDE.run(adata.obsm["spatial"], resid_expr)
     elapsed = time.time() - t_start
 
+    # Index results by gene name and attach metadata from AnnData
     df_res.set_index("g", inplace=True)
     df_res = df_res.loc[adata.var_names]
     df_res[["gene", "spatial_var"]] = adata.var[["gene", "spatial_var"]]
     df_res.to_csv(results_csv)
 
+    # Deduplicate before saving RDS (SpatialDE may produce duplicate rows)
     dedup = df_res.copy()
     dedup.insert(0, "feature", dedup.index)
     dedup = dedup.drop_duplicates(subset="feature", keep="first")

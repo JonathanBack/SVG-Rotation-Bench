@@ -1,8 +1,18 @@
+# ==============================================================================
+# run_nnsvg.R
+# Benchmarks the nnSVG method for SVG detection across rotated datasets.
+# For each rotation angle (0, 30, 45, 60), loads the corresponding AnnData,
+# builds a SpatialExperiment, normalizes, runs nnSVG, and saves results.
+# Output: scdesign3_angle{angle}_results.rds (list with res_mtest) and
+#         scdesign3_angle{angle}_runtime.csv
+# ==============================================================================
+
 library(anndata)
 library(SpatialExperiment)
 library(scran)
 library(nnSVG)
 
+# --- Setup: resolve paths ---
 project_root <- normalizePath(getwd(), winslash = "/", mustWork = TRUE)
 
 anndata_dir <- file.path(project_root, "src", "02_rotation", "outputs", "anndata", "data")
@@ -15,6 +25,7 @@ for (angle in angles_degrees) {
   rds_file <- file.path(output_dir, paste0("scdesign3_angle", angle, "_results.rds"))
   runtime_file <- file.path(output_dir, paste0("scdesign3_angle", angle, "_runtime.csv"))
 
+  # Skip if already computed
   if (file.exists(rds_file) && file.exists(runtime_file)) {
     message("Skipping angle ", angle, " -- outputs already exist")
     next
@@ -22,13 +33,16 @@ for (angle in angles_degrees) {
 
   message("Running nnSVG for angle = ", angle)
 
+  # --- Load pre-built AnnData ---
   h5ad_file <- file.path(anndata_dir, paste0("scdesign3_angle", angle, ".h5ad"))
   adata <- read_h5ad(h5ad_file)
 
+  # Transpose counts to genes x cells for SpatialExperiment
   counts <- t(as.matrix(adata$layers[["counts"]]))
   colnames(counts) <- adata$obs_names
   rownames(counts) <- adata$var_names
 
+  # Extract spatial coordinates from .obsm
   loc <- as.data.frame(adata$obsm[["spatial"]])
   colnames(loc) <- c("x", "y")
   rownames(loc) <- colnames(counts)
@@ -37,6 +51,7 @@ for (angle in angles_degrees) {
   row_data$gene_id <- rownames(row_data)
   row_data$feature_type <- "Gene Expression"
 
+  # --- Build SpatialExperiment object ---
   spe <- SpatialExperiment(
     assays = list(counts = counts),
     rowData = row_data,
@@ -44,14 +59,17 @@ for (angle in angles_degrees) {
     spatialCoordsNames = c("x", "y")
   )
 
+  # Normalize: compute size factors, then log-normalize
   spe <- computeLibraryFactors(spe)
   spe <- logNormCounts(spe)
 
+  # --- Run nnSVG ---
   set.seed(2024)
   t_start <- proc.time()
-  spe <- nnSVG(spe, n_threads = 5)
+  spe <- nnSVG(spe, n_threads = 10)
   elapsed <- proc.time() - t_start
 
+  # --- Wrap results for compatibility with downstream metric scripts ---
   df <- as.data.frame(rowData(spe))
   result <- list(res_mtest = df)
 

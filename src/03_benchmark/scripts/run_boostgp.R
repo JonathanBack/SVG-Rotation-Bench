@@ -1,5 +1,14 @@
+# ==============================================================================
+# run_boostgp.R
+# Benchmarks the BOOST-GP method for SVG detection across rotated datasets.
+# Sources the BOOST-GP tool from its subdirectory, then for each rotation angle
+# loads AnnData, extracts counts and locations, runs boost.gp, and saves.
+# Output: scdesign3_angle{angle}_results.rds and runtime CSV.
+# ==============================================================================
+
 library(anndata)
 
+# --- Setup: resolve paths and source the BOOST-GP tool ---
 project_root <- normalizePath(getwd(), winslash = "/", mustWork = TRUE)
 
 boostgp_dir <- file.path(project_root, "src", "03_benchmark", "tools", "BOOST-GP")
@@ -7,6 +16,7 @@ anndata_dir <- file.path(project_root, "src", "02_rotation", "outputs", "anndata
 output_dir <- file.path(project_root, "src", "03_benchmark", "outputs", "boostgp")
 dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
 
+# Temporarily change working directory so relative source() calls resolve correctly
 owd <- setwd(boostgp_dir)
 source("R/boost.gp.R")
 setwd(owd)
@@ -24,22 +34,27 @@ for (angle in angles_degrees) {
 
   message("Running BOOST-GP for angle = ", angle)
 
+  # --- Load pre-built AnnData ---
   h5ad_file <- file.path(anndata_dir, paste0("scdesign3_angle", angle, ".h5ad"))
   adata <- read_h5ad(h5ad_file)
 
+  # Extract count matrix: cells x genes, convert to integer
   counts <- as.matrix(adata$layers[["counts"]])
   colnames(counts) <- adata$var_names
   rownames(counts) <- adata$obs_names
   mode(counts) <- "integer"
 
+  # Extract spatial coordinates: cells x 2
   loc <- as.data.frame(adata$obsm[["spatial"]])
   rownames(loc) <- adata$obs_names
   colnames(loc) <- c("x", "y")
 
+  # --- Run BOOST-GP: 100 MCMC iterations, 50 burn-in ---
   t_start <- proc.time()
   result <- boost.gp(Y = counts, loc = loc, iter = 100, burn = 50)
   elapsed <- proc.time() - t_start
 
+  # Replace NA PPI values with 0; wrap in res_mtest for downstream compatibility
   result$PPI[is.na(result$PPI)] <- 0
   result_list <- list(res_mtest = result)
 
