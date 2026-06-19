@@ -85,7 +85,7 @@ if (!requireNamespace("BiocManager", quietly = TRUE))
 
 BiocManager::install(c(
   "SingleCellExperiment", "SpatialExperiment", "scran",
-  "nnSVG", "scDesign3", "anndata"
+  "nnSVG", "anndata"
 ))
 ```
 
@@ -107,6 +107,14 @@ devtools::install_github("xzhoulab/SPARK")
 ```
 
 > **Note:** `SPARK::sparkx()` is the function used in the benchmark. The package may have additional system dependencies (e.g., a working C++ compiler for Rcpp).
+> 
+#### scDesign3 (GitHub)
+
+scDesign3 is not available on CRAN or Bioconductor. Install from the authors' GitHub repository:
+if (!require("devtools", quietly = TRUE))
+    install.packages("devtools")
+devtools::install_github("SONGDONGYUAN1994/scDesign3")
+
 
 ### 3. External tools (manual download)
 
