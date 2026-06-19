@@ -1,2 +1,2 @@
 "tool","tool_label","n_sig_0","n_sig_30","n_sig_45","n_sig_60","n_consistent","n_union","consistency_rate","mean_jaccard"
-"moransi","MORANSI",1013,1013,1013,1013,1013,1013,1,1
+"moransi","MORANSI",1013,1013,1012,1013,1012,1013,0.999012833168806,0.999506416584403

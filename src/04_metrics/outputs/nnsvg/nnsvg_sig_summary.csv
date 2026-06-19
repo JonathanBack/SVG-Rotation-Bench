@@ -1,2 +1,2 @@
 "tool","tool_label","n_sig_0","n_sig_30","n_sig_45","n_sig_60","n_consistent","n_union","consistency_rate","mean_jaccard"
-"nnsvg","NNSVG",1011,1016,1011,1010,1003,1022,0.981409001956947,0.989842907539585
+"nnsvg","NNSVG",1011,1014,1011,1010,1003,1022,0.981409001956947,0.989837765226932

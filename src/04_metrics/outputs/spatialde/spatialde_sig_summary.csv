@@ -1,2 +1,2 @@
 "tool","tool_label","n_sig_0","n_sig_30","n_sig_45","n_sig_60","n_consistent","n_union","consistency_rate","mean_jaccard"
-"spatialde","SPATIALDE",1036,1032,1022,1042,1022,1044,0.978927203065134,0.988453353588156
+"spatialde","SPATIALDE",1036,1037,1044,1025,1025,1046,0.979923518164436,0.988478787291909
