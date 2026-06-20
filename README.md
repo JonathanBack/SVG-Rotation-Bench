@@ -110,8 +110,9 @@ devtools::install_github("xzhoulab/SPARK")
 > 
 #### scDesign3 (GitHub)
 
-```r
 scDesign3 is not available on CRAN or Bioconductor. Install from the authors' GitHub repository:
+
+```r
 if (!require("devtools", quietly = TRUE))
     install.packages("devtools")
 devtools::install_github("SONGDONGYUAN1994/scDesign3")
