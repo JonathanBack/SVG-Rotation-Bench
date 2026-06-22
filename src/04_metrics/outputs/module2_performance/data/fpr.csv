@@ -1,0 +1,6 @@
+"tool","tool_label","n_negatives","n_false_pos","fpr"
+"moransi","MORANSI",50,29,0.58
+"nnsvg","NNSVG",50,30,0.6
+"smash","SMASH",50,0,0
+"sparkx","SPARKX",50,0,0
+"spatialde","SPATIALDE",50,37,0.74
