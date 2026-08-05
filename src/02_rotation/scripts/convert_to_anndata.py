@@ -1,9 +1,13 @@
 # ==============================================================================
 # convert_to_anndata.py
-# Builds AnnData (.h5ad) objects for each rotation angle by combining the
-# simulated counts with the rotated spatial locations. Performs basic QC,
-# normalization, and generates spatial scatter + violin diagnostic plots.
-# Output: scdesign3_angle{angle}.h5ad consumed by all benchmark runners.
+# Builds AnnData (.h5ad) objects for each (slice, mode, angle) by combining the
+# simulated/whole counts with the rotated spatial locations. Performs basic QC,
+# normalization, and stores raw counts in a layer.
+#
+# Edit SLICES and MODES below to control scope.
+# Input:  src/01_simulation/outputs/scDesign3/{slice}/{mode}/data/counts.csv
+#         src/02_rotation/outputs/{slice}/{mode}/locations/rotated_locations_{angle}.csv
+# Output: src/02_rotation/outputs/{slice}/{mode}/anndata/data/scdesign3_angle{angle}.h5ad
 # ==============================================================================
 
 import os
@@ -13,95 +17,136 @@ matplotlib.use("Agg")  # non-interactive backend for headless execution
 import numpy as np
 import pandas as pd
 import scanpy as sc
-import squidpy as sq
 import anndata as ad
 import scipy as sp
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-ROTATION_DIR = os.path.dirname(SCRIPT_DIR)
-
-LOCATIONS_DIR = os.path.join(ROTATION_DIR, "outputs", "locations")
-ANNDATA_DATA_DIR = os.path.join(ROTATION_DIR, "outputs", "anndata", "data")
-ANNDATA_FIGURES_DIR = os.path.join(ROTATION_DIR, "outputs", "anndata", "figures")
-
-# Count matrix from the scDesign3 simulation sweep (shared across all angles)
-COUNTS_PATH = os.path.join(
-    ROTATION_DIR, "..", "01_simulation", "outputs", "scDesign3", "data", "counts.csv"
-)
+# --- Select which slices and modes to run ---
+SLICES = ["anterior1", "anterior2", "posterior1", "posterior2"]
+MODES = ["simulated", "whole"]
 
 ANGLES = [0, 30, 45, 60]
 
-# Feature names for diagnostic visualization (gene_alpha format)
-Ttr_features = [f"Ttr_{a}" for a in ["1", "0.8", "0.6", "0.4", "0.2", "0"]]
-S100a5_features = [
-    f"S100a5_{a}" for a in ["1", "0.8", "0.6", "0.4", "0.2", "0"]
-]
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+ROTATION_DIR = os.path.dirname(SCRIPT_DIR)
+PROJECT_ROOT = os.path.dirname(os.path.dirname(ROTATION_DIR))
 
-for angle in ANGLES:
-    h5ad_path = os.path.join(ANNDATA_DATA_DIR, f"scdesign3_angle{angle}.h5ad")
-    loc_path = os.path.join(LOCATIONS_DIR, f"rotated_locations_{angle}.csv")
+COUNTS_TEMPLATE = os.path.join(
+    PROJECT_ROOT, "src", "01_simulation", "outputs", "scDesign3",
+    "{slice}", "{mode}", "data", "counts.csv"
+)
 
-    # --- Skip rebuild if AnnData already exists ---
-    if os.path.exists(h5ad_path):
-        print(f"[angle={angle}] {h5ad_path} already exists, loading")
-        adata = sc.read_h5ad(h5ad_path)
+
+def parse_var(feature_names, mode):
+    """Build var metadata depending on mode.
+
+    simulated: feature names follow "gene_alpha" format; split into gene and
+               numeric alpha suffix.
+    whole:     feature names are plain gene symbols; record gene name and NA
+               spatial_var.
+    """
+    df_var = pd.DataFrame(data={"feature_name": feature_names})
+
+    if mode == "simulated":
+        split = df_var["feature_name"].str.rsplit("_", n=1, expand=True)
+        # Guard: only treat suffix as alpha if it is numeric
+        is_numeric = split[1].apply(lambda x: x is not None and _is_numeric(x))
+        df_var["gene"] = split[0]
+        df_var.loc[is_numeric, "spatial_var"] = split.loc[is_numeric, 1]
+        df_var.loc[~is_numeric, "spatial_var"] = np.nan
+        df_var.loc[~is_numeric, "gene"] = df_var.loc[~is_numeric, "feature_name"]
     else:
-        print(f"[angle={angle}] Building AnnData from {loc_path}")
+        df_var["gene"] = df_var["feature_name"]
+        df_var["spatial_var"] = np.nan
 
-        # Load rotated locations and transposed counts (cells x genes)
-        df_loc = pd.read_csv(loc_path, index_col=0)
-        df_count = pd.read_csv(COUNTS_PATH, index_col=0).transpose()
+    df_var = df_var.set_index("feature_name", drop=True)
+    return df_var
 
-        # Build var metadata: split "gene_alpha" into gene name and signal fraction
-        df_var = pd.DataFrame(data={"feature_name": df_count.columns})
-        df_var[["gene", "spatial_var"]] = df_var["feature_name"].str.rsplit(
-            "_", n=1, expand=True
+
+def _is_numeric(s):
+    try:
+        float(s)
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
+for slice_name in SLICES:
+    for mode in MODES:
+        counts_path = COUNTS_TEMPLATE.format(slice=slice_name, mode=mode)
+        locations_dir = os.path.join(
+            ROTATION_DIR, "outputs", slice_name, mode, "locations"
         )
-        df_var = df_var.set_index("feature_name", drop=True)
-
-        # Construct AnnData with sparse counts, spatial coordinates in .obsm
-        counts = sp.sparse.csr_matrix(df_count.values)
-        adata = ad.AnnData(
-            counts,
-            obs=df_loc[["cell_type", "spatial1", "spatial2"]],
-            obsm={"spatial": df_loc[["spatial1", "spatial2"]].values},
-            var=df_var,
-            dtype=np.float32,
+        anndata_data_dir = os.path.join(
+            ROTATION_DIR, "outputs", slice_name, mode, "anndata", "data"
         )
+        os.makedirs(anndata_data_dir, exist_ok=True)
 
-        # QC, store raw counts, normalize for downstream visualization
-        sc.pp.calculate_qc_metrics(adata, percent_top=[10])
-        adata.layers["counts"] = adata.X.copy()
-        adata.uns["spatial"] = {"tissue": {}}
+        if not os.path.exists(counts_path):
+            print(f"Skipping {slice_name}/{mode} -- counts.csv not found")
+            continue
+        if not os.path.exists(locations_dir):
+            print(f"Skipping {slice_name}/{mode} -- locations dir not found")
+            continue
 
-        sc.pp.normalize_total(adata)
-        sc.pp.log1p(adata)
+        print(f"\n=== Processing slice={slice_name} mode={mode} ===")
 
-        adata.write_h5ad(h5ad_path)
-        print(f"[angle={angle}] Saved {h5ad_path}")
+        # Count matrix is genes x cells (transpose to cells x genes)
+        df_count = pd.read_csv(counts_path, index_col=0).transpose()
 
-    print(f"[angle={angle}] {adata}")
+        # Pre-build var metadata from feature names (shared across angles)
+        df_var = parse_var(df_count.columns, mode)
 
-    # --- Diagnostic plots: spatial expression and violin for Ttr and S100a5 ---
-    sq.pl.spatial_scatter(
-        adata, color=Ttr_features, library_id="tissue", ncols=6, shape=None, size=30
-    )
-    import matplotlib.pyplot as plt
-    plt.savefig(os.path.join(ANNDATA_FIGURES_DIR, f"viz_angle{angle}_Ttr_spatial.png"), dpi=150, bbox_inches="tight")
-    plt.close()
+        for angle in ANGLES:
+            h5ad_path = os.path.join(
+                anndata_data_dir, f"scdesign3_angle{angle}.h5ad"
+            )
+            loc_path = os.path.join(
+                locations_dir, f"rotated_locations_{angle}.csv"
+            )
 
-    sc.pl.violin(adata, keys=Ttr_features)
-    plt.savefig(os.path.join(ANNDATA_FIGURES_DIR, f"viz_angle{angle}_Ttr_violin.png"), dpi=150, bbox_inches="tight")
-    plt.close()
+            if not os.path.exists(loc_path):
+                print(f"  [angle={angle}] missing locations, skipping")
+                continue
 
-    sq.pl.spatial_scatter(
-        adata, color=S100a5_features, library_id="tissue", ncols=6, shape=None, size=30
-    )
-    plt.savefig(os.path.join(ANNDATA_FIGURES_DIR, f"viz_angle{angle}_S100a5_spatial.png"), dpi=150, bbox_inches="tight")
-    plt.close()
+            # --- Skip rebuild if AnnData already exists ---
+            if os.path.exists(h5ad_path):
+                print(f"  [angle={angle}] {h5ad_path} already exists, skipping")
+                continue
 
-    sc.pl.violin(adata, keys=S100a5_features)
-    plt.savefig(os.path.join(ANNDATA_FIGURES_DIR, f"viz_angle{angle}_S100a5_violin.png"), dpi=150, bbox_inches="tight")
-    plt.close()
+            print(f"  [angle={angle}] Building AnnData from {loc_path}")
 
-print("All rotation .h5ad files and visualizations saved.")
+            df_loc = pd.read_csv(loc_path, index_col=0)
+
+            # Construct AnnData with sparse counts, spatial coords in .obsm
+            counts = sp.sparse.csr_matrix(df_count.values)
+
+            # Build obs metadata; preserve cell_type if present, else constant
+            obs_cols = []
+            if "cell_type" in df_loc.columns:
+                obs_cols.append("cell_type")
+            else:
+                df_loc = df_loc.copy()
+                df_loc["cell_type"] = "cell_type_1"
+                obs_cols.append("cell_type")
+            obs_cols += ["spatial1", "spatial2"]
+
+            adata = ad.AnnData(
+                counts,
+                obs=df_loc[obs_cols],
+                obsm={"spatial": df_loc[["spatial1", "spatial2"]].values},
+                var=df_var.copy(),
+                dtype=np.float32,
+            )
+
+            # QC, store raw counts, normalize for any downstream visualization
+            sc.pp.calculate_qc_metrics(adata, percent_top=[10])
+            adata.layers["counts"] = adata.X.copy()
+            adata.uns["spatial"] = {"tissue": {}}
+
+            sc.pp.normalize_total(adata)
+            sc.pp.log1p(adata)
+
+            adata.write_h5ad(h5ad_path)
+            print(f"  [angle={angle}] Saved {h5ad_path}")
+
+print("\nAll rotation .h5ad files built.")
