@@ -1,10 +1,14 @@
 # ==============================================================================
 # run_spatialde.py
 # Benchmarks the SpatialDE method for SVG detection across rotated datasets.
-# For each angle: loads AnnData, applies NaiveDE normalization (stabilize +
-# regress out total counts), runs SpatialDE, and saves results via RDS wrapper.
-# Includes SciPy/NumPy compatibility shims for older SpatialDE versions.
-# Output: scdesign3_angle{angle}_results.rds and runtime CSV.
+# For each (slice, mode, angle): loads AnnData, applies NaiveDE normalization
+# (stabilize + regress out total counts), runs SpatialDE, and saves results via
+# RDS wrapper. Includes SciPy/NumPy compatibility shims for older SpatialDE.
+#
+# Edit SLICES and MODES below to control scope.
+# Input:  src/02_rotation/outputs/{slice}/{mode}/anndata/data/scdesign3_angle{angle}.h5ad
+# Output: src/03_benchmark/outputs/{slice}/{mode}/spatialde/scdesign3_angle{angle}_results.rds
+#         src/03_benchmark/outputs/{slice}/{mode}/spatialde/scdesign3_angle{angle}_runtime.csv
 # ==============================================================================
 
 import os
@@ -42,18 +46,17 @@ scipy.misc.derivative = (
 
 import SpatialDE
 
+# --- Select which slices and modes to run ---
+SLICES = ["anterior1", "anterior2", "posterior1", "posterior2"]
+MODES = ["simulated", "whole"]
+
+ANGLES = [0, 30, 45, 60]
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 BENCHMARK_DIR = os.path.dirname(SCRIPT_DIR)
 PROJECT_ROOT = os.path.dirname(os.path.dirname(BENCHMARK_DIR))
 
-H5AD_TEMPLATE = os.path.join(
-    PROJECT_ROOT, "src", "02_rotation", "outputs", "anndata",
-    "data", "scdesign3_angle{angle}.h5ad"
-)
-OUTPUT_DIR = os.path.join(BENCHMARK_DIR, "outputs", "spatialde")
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-ANGLES = [0, 30, 45, 60]
+OUTPUTS_ROOT = os.path.join(BENCHMARK_DIR, "outputs")
 
 
 # Helper: save a DataFrame as an R .rds file via CSV round-trip with Rscript
@@ -71,59 +74,88 @@ def save_rds(df, rds_path):
     os.remove(pvals_csv)
 
 
-for angle in ANGLES:
-    rds_file = os.path.join(OUTPUT_DIR, f"scdesign3_angle{angle}_results.rds")
-    runtime_file = os.path.join(OUTPUT_DIR, f"scdesign3_angle{angle}_runtime.csv")
-    results_csv = os.path.join(OUTPUT_DIR, f"scdesign3_angle{angle}_results.csv")
+for slice_name in SLICES:
+    for mode in MODES:
 
-    if os.path.exists(rds_file) and os.path.exists(runtime_file):
-        print(f"Skipping angle {angle} -- outputs already exist")
-        continue
+        h5ad_template = os.path.join(
+            PROJECT_ROOT, "src", "02_rotation", "outputs", slice_name, mode,
+            "anndata", "data", "scdesign3_angle{angle}.h5ad"
+        )
+        output_dir = os.path.join(OUTPUTS_ROOT, slice_name, mode, "spatialde")
+        os.makedirs(output_dir, exist_ok=True)
 
-    print(f"Running SpatialDE for angle = {angle}")
-    sys.stdout.flush()
+        if not os.path.exists(os.path.dirname(h5ad_template.format(angle=0))):
+            print(f"Skipping {slice_name}/{mode} -- AnnData dir not found")
+            continue
 
-    # --- Load AnnData with rotated spatial coordinates ---
-    h5ad_path = H5AD_TEMPLATE.format(angle=angle)
-    adata = sc.read_h5ad(h5ad_path)
-    sc.pp.calculate_qc_metrics(adata, inplace=True, percent_top=[10])
+        print(f"\n=== SpatialDE: {slice_name} / {mode} ===")
 
-    # Extract count matrix and total counts per cell
-    counts = sc.get.obs_df(
-        adata, keys=list(adata.var_names), use_raw=False, layer="counts"
-    )
-    total_counts = sc.get.obs_df(adata, keys=["total_counts"])
+        for angle in ANGLES:
+            rds_file = os.path.join(
+                output_dir, f"scdesign3_angle{angle}_results.rds"
+            )
+            runtime_file = os.path.join(
+                output_dir, f"scdesign3_angle{angle}_runtime.csv"
+            )
+            results_csv = os.path.join(
+                output_dir, f"scdesign3_angle{angle}_results.csv"
+            )
 
-    # --- NaiveDE normalization pipeline ---
-    # 1. Variance-stabilizing transformation
-    # 2. Regress out log total_counts to remove library size effects
-    t_start = time.time()
-    norm_expr = NaiveDE.stabilize(counts.T).T
-    resid_expr = NaiveDE.regress_out(
-        total_counts, norm_expr.T, "np.log(total_counts)"
-    ).T
+            if os.path.exists(rds_file) and os.path.exists(runtime_file):
+                print(f"  Skipping angle {angle} -- outputs already exist")
+                continue
 
-    # --- Run SpatialDE on the residual expression ---
-    df_res = SpatialDE.run(adata.obsm["spatial"], resid_expr)
-    elapsed = time.time() - t_start
+            h5ad_path = h5ad_template.format(angle=angle)
+            if not os.path.exists(h5ad_path):
+                print(f"  Missing AnnData for angle {angle}, skipping")
+                continue
 
-    # Index results by gene name and attach metadata from AnnData
-    df_res.set_index("g", inplace=True)
-    df_res = df_res.loc[adata.var_names]
-    df_res[["gene", "spatial_var"]] = adata.var[["gene", "spatial_var"]]
-    df_res.to_csv(results_csv)
+            print(f"  Running SpatialDE for angle = {angle}")
+            sys.stdout.flush()
 
-    # Deduplicate before saving RDS (SpatialDE may produce duplicate rows)
-    dedup = df_res.copy()
-    dedup.insert(0, "feature", dedup.index)
-    dedup = dedup.drop_duplicates(subset="feature", keep="first")
+            # --- Load AnnData with rotated spatial coordinates ---
+            adata = sc.read_h5ad(h5ad_path)
+            sc.pp.calculate_qc_metrics(adata, inplace=True, percent_top=[10])
 
-    save_rds(dedup, rds_file)
+            # Extract count matrix and total counts per cell
+            counts = sc.get.obs_df(
+                adata, keys=list(adata.var_names), use_raw=False, layer="counts"
+            )
+            total_counts = sc.get.obs_df(adata, keys=["total_counts"])
 
-    pd.DataFrame({"angle": [angle], "elapsed_sec": [elapsed]}).to_csv(
-        runtime_file, index=False
-    )
+            # --- NaiveDE normalization pipeline ---
+            # 1. Variance-stabilizing transformation
+            # 2. Regress out log total_counts to remove library size effects
+            t_start = time.time()
+            norm_expr = NaiveDE.stabilize(counts.T).T
+            resid_expr = NaiveDE.regress_out(
+                total_counts, norm_expr.T, "np.log(total_counts)"
+            ).T
 
-    print(f"Saved {rds_file} ({elapsed:.1f}s)")
+            # --- Run SpatialDE on the residual expression ---
+            df_res = SpatialDE.run(adata.obsm["spatial"], resid_expr)
+            elapsed = time.time() - t_start
 
-print("SpatialDE benchmark complete.")
+            # Index results by gene name and attach metadata from AnnData
+            df_res.set_index("g", inplace=True)
+            df_res = df_res.loc[adata.var_names]
+            # gene / spatial_var columns may be absent for whole mode; guard
+            for col in ("gene", "spatial_var"):
+                if col in adata.var.columns:
+                    df_res[col] = adata.var[col]
+            df_res.to_csv(results_csv)
+
+            # Deduplicate before saving RDS (SpatialDE may produce duplicate rows)
+            dedup = df_res.copy()
+            dedup.insert(0, "feature", dedup.index)
+            dedup = dedup.drop_duplicates(subset="feature", keep="first")
+
+            save_rds(dedup, rds_file)
+
+            pd.DataFrame({"angle": [angle], "elapsed_sec": [elapsed]}).to_csv(
+                runtime_file, index=False
+            )
+
+            print(f"    Saved {rds_file} ({elapsed:.1f}s)")
+
+print("\nSpatialDE benchmark complete.")
