@@ -5,15 +5,13 @@
 # blending the fitted spatial mean with a shuffled (non-spatial) mean matrix.
 #
 # Per slice:
-#   1. Load stxBrain slice via SeuratData (full unprocessed gene set)
-#   2. Convert to SingleCellExperiment (spatial1/spatial2 via GetTissueCoordinates)
-#   3. Select top 200 SVGs by Moran's I (prefilter to keep fit_marginal tractable)
-#   4. First pass: construct_data -> fit_marginal (GP k=500, NB) -> fit_copula
-#   5. Select top 50 genes by deviance explained
-#   6. Second pass on the 50 genes
-#   7. Sanity plot: Mbp real vs simulated at 100% signal
-#   8. Alpha sweep -> stacked counts matrix with "gene_alpha" rownames
-#   9. Save counts.csv + location.csv
+#   1. Load stxBrain slice via SeuratData; SCTransform + Moran's I (top 200)
+#   2. First pass: construct_data -> fit_marginal (GP k=500, NB) -> fit_copula
+#   3. Select top 50 genes by deviance explained
+#   4. Second pass on the 50 genes
+#   5. Sanity plot: Mbp real vs simulated at 100% signal
+#   6. Alpha sweep -> stacked counts matrix with "gene_alpha" rownames
+#   7. Save counts.csv + location.csv
 #
 # Edit SLICES below to control which slices are processed.
 # Output: src/01_simulation/outputs/scDesign3/{slice}/simulated/data/{counts,location}.csv
@@ -90,21 +88,38 @@ for (slice in SLICES) {
   dir.create(sim_fig_dir,  recursive = TRUE, showWarnings = FALSE)
 
   # ----------------------------------------------------------------------------
-  # STEP 1: Load stxBrain slice and convert to SingleCellExperiment
+  # STEP 1: Load stxBrain, run Seurat-canonical preprocessing (SCTransform +
+  # Moran's I) and convert the subsetted object to SingleCellExperiment
   # ----------------------------------------------------------------------------
 
   seu <- LoadData("stxBrain", type = slice)
 
-  # Spatial coordinates (lowres Visium grid)
+  # Canonical Visium preprocessing: SCTransform performs variance-stabilizing
+  # normalization, creates the "SCT" assay and sets VariableFeatures.
+  seu <- SCTransform(seu, assay = "Spatial", verbose = FALSE)
+
+  # Moran's I on the top 1000 variable features. Coordinates are read from the
+  # Visium spatial image attached to the Seurat object automatically.
+  seu <- FindSpatiallyVariableFeatures(
+    seu,
+    features = VariableFeatures(seu)[1:1000],
+    selection.method = "moransi"
+  )
+  top.features <- head(SpatiallyVariableFeatures(seu, method = "moransi"), 200)
+
+  # Subset the Seurat object to the top 200 SVGs
+  seu <- seu[top.features, ]
+
+  # Convert the subsetted Seurat object to SCE. Extract RAW counts from the
+  # original "Spatial" assay (not the "SCT" assay) since scDesign3 needs raw
+  # counts for construct_data(assay_use = "counts").
   coords <- GetTissueCoordinates(seu, scale = "lowres")
-  # GetTissueCoordinates returns columns: imagerow, imagecol (and possibly others)
-  # Use imagecol -> spatial1, imagerow -> spatial2 (match Visium orientation)
+  # imagecol -> spatial1, imagerow -> spatial2 (match Visium orientation)
   df_loc <- data.frame(
     spatial1 = coords$imagecol,
     spatial2 = coords$imagerow,
     row.names = rownames(coords)
   )
-
   counts_mat <- GetAssayData(seu, assay = "Spatial", layer = "counts")
 
   ref_sce <- SingleCellExperiment(
@@ -112,29 +127,10 @@ for (slice in SLICES) {
     colData = df_loc
   )
 
-  message("  Loaded slice: ", slice, " (genes=", nrow(ref_sce),
-          ", spots=", ncol(ref_sce), ")")
+  message("  Loaded slice: ", slice, " (top-200 SVGs, spots=", ncol(ref_sce), ")")
 
   # ----------------------------------------------------------------------------
-  # STEP 2: Prefilter top 200 SVGs by Moran's I (Seurat)
-  # ----------------------------------------------------------------------------
-
-  loc <- colData(ref_sce)[, c("spatial1", "spatial2")]
-  features <- FindSpatiallyVariableFeatures(counts(ref_sce),
-    spatial.location = loc,
-    selection.method = "moransi",
-    nfeatures = 200
-  )
-
-  top.features <- features[order(features$p.value), ]
-  top.features <- rownames(top.features[1:200, ])
-  de_idx <- which(rownames(ref_sce) %in% top.features)
-  ref_sce <- ref_sce[de_idx, ]
-
-  message("  Prefiltered to top 200 SVGs by Moran's I")
-
-  # ----------------------------------------------------------------------------
-  # STEP 3: First pass scDesign3 fit (top 200 genes)
+  # STEP 2: First pass scDesign3 fit (top 200 genes)
   # ----------------------------------------------------------------------------
 
   set.seed(2024)
@@ -180,7 +176,7 @@ for (slice in SLICES) {
   )
 
   # ----------------------------------------------------------------------------
-  # STEP 4: Select top 50 genes by deviance explained and subset
+  # STEP 3: Select top 50 genes by deviance explained and subset
   # ----------------------------------------------------------------------------
 
   dev_explain <- sapply(ref_marginal, function(x) {
@@ -196,7 +192,7 @@ for (slice in SLICES) {
   message("  Subselected to top 50 genes by dev.expl")
 
   # ----------------------------------------------------------------------------
-  # STEP 5: Second pass scDesign3 fit on top 50 genes
+  # STEP 4: Second pass scDesign3 fit on top 50 genes
   # ----------------------------------------------------------------------------
 
   ref_data <- construct_data(
@@ -240,7 +236,7 @@ for (slice in SLICES) {
   )
 
   # ----------------------------------------------------------------------------
-  # STEP 6: Sanity plot - Mbp real vs simulated at 100% signal
+  # STEP 5: Sanity plot - Mbp real vs simulated at 100% signal
   # ----------------------------------------------------------------------------
 
   sim_count_full <- simu_new(
@@ -273,14 +269,14 @@ for (slice in SLICES) {
             width = 10, height = 4)
 
   # ----------------------------------------------------------------------------
-  # STEP 7: Generate shuffled (non-spatial) mean matrix
+  # STEP 6: Generate shuffled (non-spatial) mean matrix
   # ----------------------------------------------------------------------------
 
   shuffle_idx <- sample(nrow(ref_para$mean_mat))
   non_de_mat <- ref_para$mean_mat[shuffle_idx, ]
 
   # ----------------------------------------------------------------------------
-  # STEP 8: Alpha sweep - simulate at alpha = 0, 0.05, ..., 1.0
+  # STEP 7: Alpha sweep - simulate at alpha = 0, 0.05, ..., 1.0
   # ----------------------------------------------------------------------------
 
   message("  Generating alpha sweep (21 levels)...")
@@ -305,7 +301,7 @@ for (slice in SLICES) {
   }) %>% do.call(rbind, .)
 
   # ----------------------------------------------------------------------------
-  # STEP 9: Export counts and location matrices
+  # STEP 8: Export counts and location matrices
   # ----------------------------------------------------------------------------
 
   write.csv(as.data.frame(ref_data$newCovariate),
