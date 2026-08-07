@@ -82,7 +82,7 @@ for (slice in SLICES) {
     next
   }
 
-  combined <- do.call("+", plots)
+  combined <- wrap_plots(plots, ncol = length(plots))
   ggsave(
     filename = file.path(sim_fig_dir,
                          glue::glue("sanity_simulation_{target_gene}.png")),
