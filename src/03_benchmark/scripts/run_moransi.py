@@ -49,79 +49,80 @@ def save_rds(df, rds_path):
     os.remove(pvals_csv)
 
 
-for slice_name in SLICES:
-    for mode in MODES:
+if __name__ == "__main__":
+    for slice_name in SLICES:
+        for mode in MODES:
 
-        h5ad_template = os.path.join(
-            PROJECT_ROOT, "src", "02_rotation", "outputs", slice_name, mode,
-            "anndata", "data", "scdesign3_angle{angle}.h5ad"
-        )
-        output_dir = os.path.join(OUTPUTS_ROOT, slice_name, mode, "moransi")
-        os.makedirs(output_dir, exist_ok=True)
-
-        if not os.path.exists(os.path.dirname(h5ad_template.format(angle=0))):
-            print(f"Skipping {slice_name}/{mode} -- AnnData dir not found")
-            continue
-
-        print(f"\n=== Moran's I: {slice_name} / {mode} ===")
-
-        for angle in ANGLES:
-            rds_file = os.path.join(
-                output_dir, f"scdesign3_angle{angle}_results.rds"
+            h5ad_template = os.path.join(
+                PROJECT_ROOT, "src", "02_rotation", "outputs", slice_name, mode,
+                "anndata", "data", "scdesign3_angle{angle}.h5ad"
             )
-            runtime_file = os.path.join(
-                output_dir, f"scdesign3_angle{angle}_runtime.csv"
-            )
-            results_csv = os.path.join(
-                output_dir, f"scdesign3_angle{angle}_results.csv"
-            )
+            output_dir = os.path.join(OUTPUTS_ROOT, slice_name, mode, "moransi")
+            os.makedirs(output_dir, exist_ok=True)
 
-            if os.path.exists(rds_file) and os.path.exists(runtime_file):
-                print(f"  Skipping angle {angle} -- outputs already exist")
+            if not os.path.exists(os.path.dirname(h5ad_template.format(angle=0))):
+                print(f"Skipping {slice_name}/{mode} -- AnnData dir not found")
                 continue
 
-            h5ad_path = h5ad_template.format(angle=angle)
-            if not os.path.exists(h5ad_path):
-                print(f"  Missing AnnData for angle {angle}, skipping")
-                continue
+            print(f"\n=== Moran's I: {slice_name} / {mode} ===")
 
-            print(f"  Running Moran's I for angle = {angle}")
-            sys.stdout.flush()
+            for angle in ANGLES:
+                rds_file = os.path.join(
+                    output_dir, f"scdesign3_angle{angle}_results.rds"
+                )
+                runtime_file = os.path.join(
+                    output_dir, f"scdesign3_angle{angle}_runtime.csv"
+                )
+                results_csv = os.path.join(
+                    output_dir, f"scdesign3_angle{angle}_results.csv"
+                )
 
-            # --- Load AnnData with rotated spatial coordinates ---
-            adata = sc.read_h5ad(h5ad_path)
+                if os.path.exists(rds_file) and os.path.exists(runtime_file):
+                    print(f"  Skipping angle {angle} -- outputs already exist")
+                    continue
 
-            # Build spatial neighbor graph using Delaunay triangulation
-            sq.gr.spatial_neighbors(adata, coord_type="generic", delaunay=True)
+                h5ad_path = h5ad_template.format(angle=angle)
+                if not os.path.exists(h5ad_path):
+                    print(f"  Missing AnnData for angle {angle}, skipping")
+                    continue
 
-            # --- Run Moran's I with 100 permutations, parallelized over 10 cores
-            t_start = time.time()
-            sq.gr.spatial_autocorr(
-                adata, mode="moran", n_perms=100, n_jobs=10,
-                genes=adata.var_names
-            )
-            elapsed = time.time() - t_start
+                print(f"  Running Moran's I for angle = {angle}")
+                sys.stdout.flush()
 
-            # Extract results and attach gene-level metadata from AnnData
-            df_res = adata.uns["moranI"]
-            df_res = df_res.loc[adata.var_names]
-            # gene / spatial_var columns may be absent for whole mode; guard
-            for col in ("gene", "spatial_var"):
-                if col in adata.var.columns:
-                    df_res[col] = adata.var[col]
-            df_res.to_csv(results_csv)
+                # --- Load AnnData with rotated spatial coordinates ---
+                adata = sc.read_h5ad(h5ad_path)
 
-            save_rds(
-                df_res.reset_index().rename(
-                    columns={df_res.index.name or "": "feature"}
-                ),
-                rds_file,
-            )
+                # Build spatial neighbor graph using Delaunay triangulation
+                sq.gr.spatial_neighbors_delaunay(adata)
 
-            pd.DataFrame({"angle": [angle], "elapsed_sec": [elapsed]}).to_csv(
-                runtime_file, index=False
-            )
+                # --- Run Moran's I with 100 permutations, parallelized over 10 cores
+                t_start = time.time()
+                sq.gr.spatial_autocorr(
+                    adata, mode="moran", n_perms=100, n_jobs=10,
+                    genes=adata.var_names
+                )
+                elapsed = time.time() - t_start
 
-            print(f"    Saved {rds_file} ({elapsed:.1f}s)")
+                # Extract results and attach gene-level metadata from AnnData
+                df_res = adata.uns["moranI"]
+                df_res = df_res.loc[adata.var_names]
+                # gene / spatial_var columns may be absent for whole mode; guard
+                for col in ("gene", "spatial_var"):
+                    if col in adata.var.columns:
+                        df_res[col] = adata.var[col]
+                df_res.to_csv(results_csv)
 
-print("\nMoran's I benchmark complete.")
+                save_rds(
+                    df_res.reset_index().rename(
+                        columns={df_res.index.name or "": "feature"}
+                    ),
+                    rds_file,
+                )
+
+                pd.DataFrame({"angle": [angle], "elapsed_sec": [elapsed]}).to_csv(
+                    runtime_file, index=False
+                )
+
+                print(f"    Saved {rds_file} ({elapsed:.1f}s)")
+
+    print("\nMoran's I benchmark complete.")
