@@ -52,3 +52,4 @@ rsconnect/
 *.csv
 *.pdf
 *.png
+*.h5ad
