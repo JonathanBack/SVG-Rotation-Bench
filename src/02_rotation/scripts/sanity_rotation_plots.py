@@ -27,7 +27,7 @@ MODES = ["simulated", "whole"]
 ANGLES = [0, 30, 45, 60]
 
 # Toggle to also produce an all-slices x all-angles combined figure
-ALL_SLICES_FIGURE = False
+ALL_SLICES_FIGURE = True
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROTATION_DIR = os.path.dirname(SCRIPT_DIR)
