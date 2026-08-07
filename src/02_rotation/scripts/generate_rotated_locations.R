@@ -14,46 +14,7 @@ MODES  <- c("simulated", "whole")
 
 project_root <- normalizePath(getwd(), winslash = "/", mustWork = TRUE)
 
-# --- Rotation matrix builder: standard 2D rotation by angle_degrees ---
-rotation_matrix_2d <- function(angle_degrees) {
-  angle_radians <- angle_degrees * pi / 180
-  matrix(
-    c(
-      cos(angle_radians), -sin(angle_radians),
-      sin(angle_radians),  cos(angle_radians)
-    ),
-    nrow = 2,
-    byrow = TRUE,
-    dimnames = list(c("spatial1", "spatial2"), c("spatial1", "spatial2"))
-  )
-}
 
-# --- Coordinate rotation: center, rotate, uncenter ---
-#   coordinates: n x 2 matrix (spatial1, spatial2)
-#   angle_degrees: rotation angle in degrees
-#   center: if TRUE, rotation is performed around the centroid (default)
-rotate_coordinates <- function(coordinates, angle_degrees, center = TRUE) {
-  coordinates <- as.matrix(coordinates)
-  if (ncol(coordinates) != 2) {
-    stop("`coordinates` must have exactly two columns.", call. = FALSE)
-  }
-  if (is.null(colnames(coordinates))) {
-    colnames(coordinates) <- c("spatial1", "spatial2")
-  }
-  # Compute centroid (if centering) or use origin
-  center_point <- if (center) {
-    colMeans(coordinates, na.rm = TRUE)
-  } else {
-    c(0, 0)
-  }
-  # Translate to origin, apply rotation, translate back
-  translated <- sweep(coordinates, 2, center_point, FUN = "-")
-  rotated <- translated %*% t(rotation_matrix_2d(angle_degrees))
-  rotated <- sweep(rotated, 2, center_point, FUN = "+")
-  colnames(rotated) <- colnames(coordinates)
-  rownames(rotated) <- rownames(coordinates)
-  rotated
-}
 
 angles_degrees <- c(0, 30, 45, 60)
 
@@ -85,15 +46,26 @@ for (slice in SLICES) {
 
     # --- Rotate and export for each angle ---
     for (angle in angles_degrees) {
-      rot_coords <- rotate_coordinates(coords, angle_degrees = angle, center = FALSE)
+      angle_radians <- angle * pi / 180
+      R <- matrix(
+        c(cos(angle_radians),  sin(angle_radians),
+          -sin(angle_radians), cos(angle_radians)),
+        nrow = 2, byrow = TRUE
+      )
+      rot_coords <- as.matrix(coords) %*% R
+      colnames(rot_coords) <- c("spatial1", "spatial2")
+      rownames(rot_coords) <- rownames(coords)
+
       rot_df <- data.frame(
         spot_id = rownames(location_table),
-        metadata,
         spatial1 = unname(rot_coords[, "spatial1"]),
         spatial2 = unname(rot_coords[, "spatial2"]),
         row.names = NULL,
         check.names = FALSE
       )
+      if (!is.null(metadata) && ncol(metadata) > 0) {
+        rot_df <- cbind(rot_df, metadata)
+      }
       write.csv(rot_df,
                 file.path(rotation_output_dir,
                            paste0("rotated_locations_", angle, ".csv")),
