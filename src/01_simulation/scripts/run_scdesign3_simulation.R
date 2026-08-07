@@ -116,8 +116,8 @@ for (slice in SLICES) {
   coords <- GetTissueCoordinates(seu, scale = "lowres")
   # imagecol -> spatial1, imagerow -> spatial2 (match Visium orientation)
   df_loc <- data.frame(
-    spatial1 = coords$imagecol,
-    spatial2 = coords$imagerow,
+    spatial1 = coords$x,
+    spatial2 = coords$y,
     row.names = rownames(coords)
   )
   counts_mat <- GetAssayData(seu, assay = "Spatial", layer = "counts")

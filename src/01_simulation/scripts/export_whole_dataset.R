@@ -37,8 +37,8 @@ for (slice in SLICES) {
   # Spatial coordinates (lowres Visium grid) -> match simulation script convention
   coords <- GetTissueCoordinates(seu, scale = "lowres")
   df_loc <- data.frame(
-    spatial1 = coords$imagecol,
-    spatial2 = coords$imagerow,
+    spatial1 = coords$x,
+    spatial2 = coords$y,
     row.names = rownames(coords)
   )
 

@@ -16,9 +16,9 @@ library(patchwork)
 
 # --- Select which slices and which gene to visualize ---
 SLICES <- c("anterior1", "anterior2", "posterior1", "posterior2")
-GENE   <- "Mbp"  # if absent for a slice, falls back to first available
+GENE   <- "Camk2n1"  # if absent for a slice, falls back to first available
 
-ALPHA_LEVELS <- c("1", "0.6", "0.2", "0")
+ALPHA_LEVELS <- c("1", "0.9", "0.6", "0.3", "0")
 
 project_root <- normalizePath(getwd(), winslash = "/", mustWork = TRUE)
 
