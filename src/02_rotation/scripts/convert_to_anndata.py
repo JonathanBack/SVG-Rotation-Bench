@@ -135,7 +135,6 @@ for slice_name in SLICES:
                 obs=df_loc[obs_cols],
                 obsm={"spatial": df_loc[["spatial1", "spatial2"]].values},
                 var=df_var.copy(),
-                dtype=np.float32,
             )
 
             # QC, store raw counts, normalize for any downstream visualization
