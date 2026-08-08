@@ -10,7 +10,6 @@
 #         src/03_benchmark/outputs/{slice}/{mode}/nnsvg/scdesign3_angle{angle}_runtime.csv
 # ==============================================================================
 
-library(anndata)
 library(SpatialExperiment)
 library(scran)
 library(nnSVG)
@@ -26,16 +25,30 @@ angles_degrees <- c(0, 30, 45, 60)
 for (slice in SLICES) {
   for (mode in MODES) {
 
-    anndata_dir <- file.path(project_root, "src", "02_rotation", "outputs",
-                             slice, mode, "anndata", "data")
+    counts_file <- file.path(project_root, "src", "01_simulation", "outputs",
+                             "scDesign3", slice, mode, "data", "counts.csv")
+    locations_dir <- file.path(project_root, "src", "02_rotation", "outputs",
+                               slice, mode, "locations")
     output_dir <- file.path(project_root, "src", "03_benchmark", "outputs",
                             slice, mode, "nnsvg")
     dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
 
-    if (!dir.exists(anndata_dir)) {
-      message("Skipping ", slice, "/", mode, " -- AnnData dir not found")
+    if (!file.exists(counts_file)) {
+      message("Skipping ", slice, "/", mode, " -- counts.csv not found")
       next
     }
+    if (!dir.exists(locations_dir)) {
+      message("Skipping ", slice, "/", mode, " -- locations dir not found")
+      next
+    }
+
+    # Load counts once (genes x cells) — shared across all angles
+    counts <- read.csv(counts_file, row.names = 1, check.names = FALSE)
+    counts <- as.matrix(counts)
+
+    # Minimal row metadata
+    row_data <- data.frame(gene_id = rownames(counts))
+
     message("\n=== nnSVG: ", slice, " / ", mode, " ===")
 
     for (angle in angles_degrees) {
@@ -48,29 +61,26 @@ for (slice in SLICES) {
         next
       }
 
-      h5ad_file <- file.path(anndata_dir, paste0("scdesign3_angle", angle, ".h5ad"))
-      if (!file.exists(h5ad_file)) {
-        message("  Missing AnnData for angle ", angle, ", skipping")
+      location_file <- file.path(locations_dir,
+                                 paste0("rotated_locations_", angle, ".csv"))
+      if (!file.exists(location_file)) {
+        message("  Missing locations for angle ", angle, ", skipping")
         next
       }
       message("  Running nnSVG for angle = ", angle)
 
-      # --- Load pre-built AnnData ---
-      adata <- read_h5ad(h5ad_file)
+      # Load rotated spatial coordinates for this angle
+      locations <- read.csv(location_file, row.names = 1, check.names = FALSE)
 
-      # Transpose counts to genes x cells for SpatialExperiment
-      counts <- t(as.matrix(adata$layers[["counts"]]))
-      colnames(counts) <- as.character(adata$obs_names)
-      rownames(counts) <- as.character(adata$var_names)
-
-      # Extract spatial coordinates from .obsm
-      loc <- as.data.frame(as.matrix(adata$obsm[["spatial"]]))
+      # Coordinates for SpatialExperiment (renamed to x/y)
+      loc <- as.data.frame(locations[, c("spatial1", "spatial2")])
       colnames(loc) <- c("x", "y")
       rownames(loc) <- colnames(counts)
 
-      row_data <- as.data.frame(adata$var)
-      row_data$gene_id <- rownames(row_data)
-      row_data$feature_type <- "Gene Expression"
+      # Include cell_type in colData if present
+      if ("cell_type" %in% names(locations)) {
+        loc$cell_type <- locations$cell_type
+      }
 
       # --- Build SpatialExperiment object ---
       spe <- SpatialExperiment(
