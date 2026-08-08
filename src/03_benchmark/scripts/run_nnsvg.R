@@ -60,15 +60,15 @@ for (slice in SLICES) {
 
       # Transpose counts to genes x cells for SpatialExperiment
       counts <- t(as.matrix(adata$layers[["counts"]]))
-      colnames(counts) <- adata$obs_names
-      rownames(counts) <- adata$var_names
+      colnames(counts) <- as.character(adata$obs_names)
+      rownames(counts) <- as.character(adata$var_names)
 
       # Extract spatial coordinates from .obsm
-      loc <- as.data.frame(adata$obsm[["spatial"]])
+      loc <- as.data.frame(as.matrix(adata$obsm[["spatial"]]))
       colnames(loc) <- c("x", "y")
       rownames(loc) <- colnames(counts)
 
-      row_data <- adata$var
+      row_data <- as.data.frame(adata$var)
       row_data$gene_id <- rownames(row_data)
       row_data$feature_type <- "Gene Expression"
 
