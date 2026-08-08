@@ -53,3 +53,5 @@ rsconnect/
 *.pdf
 *.png
 *.h5ad
+*.rds
+*.pyc
