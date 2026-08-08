@@ -94,6 +94,9 @@ for (slice in SLICES) {
       spe <- computeLibraryFactors(spe)
       spe <- logNormCounts(spe)
 
+      # Filter low-expressed and mitochondrial genes (nnSVG requirement)
+      spe <- filter_genes(spe)
+
       # --- Run nnSVG ---
       set.seed(2024)
       t_start <- proc.time()
