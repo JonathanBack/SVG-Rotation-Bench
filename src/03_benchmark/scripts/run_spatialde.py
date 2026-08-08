@@ -46,6 +46,12 @@ scipy.misc.derivative = (
 
 import SpatialDE
 
+# --- Pandas compatibility shim for SpatialDE qvalue ---
+# SpatialDE's qvalue() calls pv.ravel(), but modern pandas Series no longer
+# has this method. Convert to numpy array before passing to the original.
+_original_qvalue = SpatialDE.util.qvalue
+SpatialDE.util.qvalue = lambda pv: _original_qvalue(np.asarray(pv))
+
 # --- Select which slices and modes to run ---
 SLICES = ["anterior1", "anterior2", "posterior1", "posterior2"]
 MODES = ["simulated", "whole"]
