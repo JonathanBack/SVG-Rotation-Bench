@@ -55,3 +55,4 @@ rsconnect/
 *.h5ad
 *.rds
 *.pyc
+/tools
