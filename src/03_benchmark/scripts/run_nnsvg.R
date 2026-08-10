@@ -47,7 +47,7 @@ for (slice in SLICES) {
     counts <- as.matrix(counts)
 
     # Minimal row metadata
-    row_data <- data.frame(gene_id = rownames(counts))
+    row_data <- data.frame(gene_name = rownames(counts))
 
     message("\n=== nnSVG: ", slice, " / ", mode, " ===")
 
