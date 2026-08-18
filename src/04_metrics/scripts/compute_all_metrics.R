@@ -25,15 +25,8 @@
 
 library(ggplot2)
 library(reshape2)
-library(RColorBrewer)
-library(patchwork)
 library(dplyr)
-library(tidyr)
-
-ggVennDiagram_available <- requireNamespace("ggVennDiagram", quietly = TRUE)
-if (ggVennDiagram_available) {
-  library(ggVennDiagram)
-}
+library(ggvenn)
 
 # --- Select which slices and modes to run ---
 SLICES <- c("anterior1", "anterior2", "posterior1", "posterior2")
@@ -56,7 +49,7 @@ adj_pval_col <- list(
   sparkx    = "adjustedPval",
   nnsvg     = "padj",
   spatialde = "qval",
-  moransi   = "pval_norm_fdr_bh",
+  moransi   = "pval_sim_fdr_bh",
   smash     = "adjusted_pval"
 )
 
@@ -72,27 +65,7 @@ method_colors <- c(
 angles <- c(0, 30, 45, 60)
 pairs_all <- list(c("0", "30"), c("0", "45"), c("0", "60"),
                   c("30", "45"), c("30", "60"), c("45", "60"))
-
-# --- Bioinformatics publication-ready theme ---
-theme_bioinformatics <- function(base_size = 12) {
-  theme_bw(base_size = base_size) +
-    theme(
-      panel.grid.major      = element_line(color = "gray90", linewidth = 0.3),
-      panel.grid.minor      = element_blank(),
-      panel.border          = element_rect(color = "black", linewidth = 0.5),
-      strip.background      = element_rect(fill = "gray95", color = "black", linewidth = 0.5),
-      strip.text            = element_text(face = "bold", size = base_size),
-      axis.title            = element_text(face = "bold", size = base_size + 1),
-      axis.text             = element_text(size = base_size),
-      legend.title          = element_text(face = "bold", size = base_size),
-      legend.text           = element_text(size = base_size - 1),
-      legend.background     = element_rect(fill = "white", color = "gray80"),
-      plot.title            = element_text(face = "bold", size = base_size + 2, hjust = 0.5),
-      plot.subtitle         = element_text(size = base_size, hjust = 0.5, color = "gray30"),
-      plot.caption          = element_text(size = base_size - 2, hjust = 1, color = "gray50"),
-      plot.margin           = margin(10, 10, 10, 10)
-    )
-}
+pairs_vs_0 <- list(c("0", "30"), c("0", "45"), c("0", "60"))
 
 # --- Helper: save both PNG (cairo) and PDF ---
 save_figure <- function(plot, filename_base, width, height, dpi = 300) {
@@ -107,29 +80,6 @@ jaccard_index <- function(set_a, set_b) {
   uni   <- length(union(set_a, set_b))
   if (uni == 0) return(NA_real_)
   inter / uni
-}
-
-# --- Helper: classification metrics ---
-compute_classification_metrics <- function(truth, predicted) {
-  tp <- as.numeric(sum(truth == 1 & predicted == 1, na.rm = TRUE))
-  tn <- as.numeric(sum(truth == 0 & predicted == 0, na.rm = TRUE))
-  fp <- as.numeric(sum(truth == 0 & predicted == 1, na.rm = TRUE))
-  fn <- as.numeric(sum(truth == 1 & predicted == 0, na.rm = TRUE))
-  sensitivity <- ifelse((tp + fn) > 0, tp / (tp + fn), NA_real_)
-  specificity <- ifelse((tn + fp) > 0, tn / (tn + fp), NA_real_)
-  precision   <- ifelse((tp + fp) > 0, tp / (tp + fp), NA_real_)
-  fdr         <- ifelse((tp + fp) > 0, fp / (tp + fp), NA_real_)
-  f1          <- ifelse((precision + sensitivity) > 0,
-                        2 * precision * sensitivity / (precision + sensitivity), NA_real_)
-  mcc_num <- (tp * tn - fp * fn)
-  mcc_den <- sqrt(max(0, (tp + fp) * (tp + fn) * (tn + fp) * (tn + fn)))
-  mcc <- ifelse(mcc_den > 0, mcc_num / mcc_den, NA_real_)
-  balanced_acc <- (sensitivity + specificity) / 2
-  data.frame(TP = tp, TN = tn, FP = fp, FN = fn,
-             Sensitivity = sensitivity, Specificity = specificity,
-             Precision = precision, FDR = fdr, F1 = f1,
-             MCC = mcc, BalancedAccuracy = balanced_acc,
-             stringsAsFactors = FALSE)
 }
 
 # ==============================================================================
@@ -269,36 +219,33 @@ for (slice in SLICES) {
     }
 
     # Venn diagrams (4-way: 0, 30, 45, 60) per method
-    # Distinct border colors per angle; low-alpha fill so intersection counts are readable
-    angle_edge_colors <- c("1" = "#0072B2", "2" = "#D55E00", "3" = "#009E73", "4" = "#CC79A7")
-    angle_labels <- c("1" = "0\u00b0", "2" = "30\u00b0", "3" = "45\u00b0", "4" = "60\u00b0")
+    # Per-set semi-transparent fills (Wong palette), black borders,
+    # labels show both count and percent (1 decimal digit).
 
-    if (ggVennDiagram_available) {
-      for (tool in tools) {
-        sets <- sig_sets_by_tool[[tool]]
-        if (length(sets) < 4) next
-        venn_data <- list(`0` = sets[["0"]], `30` = sets[["30"]],
-                          `45` = sets[["45"]], `60` = sets[["60"]])
-        p_venn <- ggVennDiagram(venn_data, label = "count", label_alpha = 0,
-                                edge_size = 0.8)
-        # Override the edge colour mapping to use distinct colors per angle
-        p_venn$layers[[2]]$mapping <- aes(colour = factor(id), group = id,
-                                           linetype = I(linetype), linewidth = I(linewidth))
-        p_venn <- p_venn +
-          scale_fill_gradient(low = "#F7F7F7", high = method_colors[toupper(tool)],
-                              name = "Count", aesthetics = "fill") +
-          scale_colour_manual(values = angle_edge_colors, name = "Angle",
-                              labels = angle_labels) +
-          labs(title = paste0(toupper(tool), ": Significant SVG Overlap Across Rotations (", slice, "/", mode, ")"),
-               subtitle = "Adjusted p < 0.05 | Intersection = consistent across all angles") +
-          theme_bioinformatics() +
-          theme(plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
-                legend.position = "right")
-        save_figure(p_venn, file.path(module1_fig_dir, paste0("venn_", tool)),
-                    width = 10, height = 8)
-      }
-    } else {
-      message("ggVennDiagram not available - skipping Venn diagrams")
+    for (tool in tools) {
+      sets <- sig_sets_by_tool[[tool]]
+      if (length(sets) < 4) next
+      venn_data <- list(
+        Original   = sets[["0"]],
+        `30 degree` = sets[["30"]],
+        `45 degree` = sets[["45"]],
+        `60 degree` = sets[["60"]]
+      )
+      p_venn <- ggvenn(
+        venn_data,
+        fill_color = c("#0072B2", "#D55E00", "#009E73", "#CC79A7"),
+        fill_alpha = 0.35,
+        stroke_color = "black",
+        stroke_size  = 0.8,
+        show_stats = "cp",
+        digits = 1,
+        text_color = "black"
+      ) +
+        labs(title = paste0(toupper(tool), ": Significant SVG Overlap Across Rotations (", slice, "/", mode, ")"),
+             subtitle = "Adjusted p < 0.05 | Intersection = consistent across all angles") +
+        theme(plot.title = element_text(face = "bold", size = 14, hjust = 0.5))
+      save_figure(p_venn, file.path(module1_fig_dir, paste0("venn_", tool)),
+                  width = 10, height = 8)
     }
 
     # Cross-method Jaccard heatmap
@@ -312,7 +259,7 @@ for (slice in SLICES) {
         labs(x = "Angle pair", y = "Method",
              title = paste0("Set Overlap: Jaccard Index Across Angle Pairs (", slice, "/", mode, ")"),
              subtitle = "Jaccard = |intersection| / |union| of significant gene sets") +
-        theme_bioinformatics() +
+        theme_bw() +
         theme(axis.text.x = element_text(angle = 30, hjust = 1))
       save_figure(p_jaccard, file.path(module1_fig_dir, "jaccard_heatmap"),
                   width = 10, height = 6)
@@ -335,20 +282,21 @@ for (slice in SLICES) {
 
       baseline_data <- all_data %>% filter(angle == 0)
 
-      # --- Classification metrics at adj p < 0.05 (used by confusion matrix) ---
+      # --- Confusion matrix counts at adj p < 0.05 ---
       class_df <- do.call(rbind, lapply(tools, function(tool) {
         sub <- all_data[all_data$tool == tool & all_data$angle == 0, ]
         if (nrow(sub) == 0) return(NULL)
         truth <- as.integer(sub$alpha > 0)
         predicted <- as.integer(sub$significant)
-        cm <- compute_classification_metrics(truth, predicted)
-        cm$tool <- tool; cm$tool_label <- toupper(tool); cm$angle <- 0
-        cm
+        data.frame(
+          tool = tool, tool_label = toupper(tool), angle = 0,
+          TP = sum(truth == 1 & predicted == 1, na.rm = TRUE),
+          TN = sum(truth == 0 & predicted == 0, na.rm = TRUE),
+          FP = sum(truth == 0 & predicted == 1, na.rm = TRUE),
+          FN = sum(truth == 1 & predicted == 0, na.rm = TRUE),
+          stringsAsFactors = FALSE
+        )
       }))
-      if (!is.null(class_df) && nrow(class_df) > 0) {
-        write.csv(class_df, file.path(module2_data_dir, "classification_metrics.csv"),
-                  row.names = FALSE)
-      }
 
       # --- Metric 2.1: Statistical Calibration (FPR) ---
       fpr_summary <- baseline_data %>%
@@ -374,7 +322,7 @@ for (slice in SLICES) {
         labs(x = "Method", y = "False Positive Rate",
              title = paste0("Statistical Calibration: FPR at alpha = 0 (0\u00b0 baseline) | ", slice),
              subtitle = "Dashed line = nominal 0.05 threshold | FPR >> 0.05 = overly aggressive") +
-        theme_bioinformatics()
+        theme_bw()
       save_figure(p_fpr, file.path(module2_fig_dir, "fpr_barplot"), width = 9, height = 6)
 
       # --- Metric 2.2: Limit of Detection (Sensitivity across signal gradients)
@@ -404,7 +352,7 @@ for (slice in SLICES) {
         labs(x = "Signal strength (alpha)", y = "Sensitivity (Power)",
              title = paste0("Limit of Detection: Sensitivity Across Signal Gradients (0\u00b0) | ", slice),
              subtitle = "At what signal strength does each method recognize an SVG?") +
-        theme_bioinformatics() +
+        theme_bw() +
         theme(legend.position = "right")
       save_figure(p_sens, file.path(module2_fig_dir, "sensitivity_lines"), width = 10, height = 6)
 
@@ -421,11 +369,68 @@ for (slice in SLICES) {
           labs(x = "Confusion Matrix Cell", y = "Method",
                title = paste0("Confusion Matrix at 0\u00b0 - All Methods | ", slice),
                subtitle = "Adjusted p < 0.05 significance threshold") +
-          theme_bioinformatics() +
+          theme_bw() +
           theme(axis.text.y = element_text(face = "bold", size = 11))
         save_figure(p_conf, file.path(module2_fig_dir, "confusion_matrix_heatmap"),
                     width = 10, height = 6)
       }
+
+      # --- Metric 2.4: Jaccard by alpha (rotation consistency vs signal strength) ---
+      # For each alpha level, compute Jaccard between 0° and each rotated angle
+      # using ONLY features at that alpha. Shows how signal strength affects
+      # cross-angle set agreement.
+
+      jaccard_by_alpha <- do.call(rbind, lapply(tools, function(tool) {
+        do.call(rbind, lapply(pairs_vs_0, function(pair) {
+          a <- pair[1]; b <- pair[2]
+          do.call(rbind, lapply(sort(unique(all_data$alpha)), function(alpha_level) {
+            sig_a <- all_data$feature[
+              all_data$tool == tool & all_data$angle == as.numeric(a) &
+              all_data$alpha == alpha_level & all_data$significant
+            ]
+            sig_b <- all_data$feature[
+              all_data$tool == tool & all_data$angle == as.numeric(b) &
+              all_data$alpha == alpha_level & all_data$significant
+            ]
+            data.frame(
+              tool = tool, tool_label = toupper(tool),
+              alpha = alpha_level, angle_a = a, angle_b = b,
+              jaccard = jaccard_index(sig_a, sig_b),
+              pair_label = paste0(a, "\u00b0 vs ", b, "\u00b0"),
+              stringsAsFactors = FALSE
+            )
+          }))
+        }))
+      }))
+      write.csv(jaccard_by_alpha,
+                file.path(module2_data_dir, "jaccard_by_alpha.csv"), row.names = FALSE)
+
+      cat("\nJaccard by alpha (0\u00b0 vs rotated):\n")
+      print(jaccard_by_alpha %>%
+              filter(!is.na(jaccard)) %>%
+              group_by(tool_label) %>%
+              summarise(min_j = min(jaccard), max_j = max(jaccard), mean_j = mean(jaccard),
+                        .groups = "drop"))
+
+      pair_colors <- c("0\u00b0 vs 30\u00b0" = "#0072B2",
+                       "0\u00b0 vs 45\u00b0" = "#D55E00",
+                       "0\u00b0 vs 60\u00b0" = "#009E73")
+
+      p_jaccard_alpha <- ggplot(jaccard_by_alpha,
+                                aes(x = alpha, y = jaccard,
+                                    color = pair_label, group = pair_label)) +
+        geom_line(linewidth = 1) +
+        geom_point(size = 2) +
+        facet_wrap(~ tool_label, ncol = 3) +
+        scale_color_manual(values = pair_colors, name = "Angle pair") +
+        scale_y_continuous(limits = c(0, 1)) +
+        labs(x = "Signal strength (alpha)", y = "Jaccard index",
+             title = paste0("Jaccard Index vs Signal Strength | ", slice),
+             subtitle = "Consistency of significant sets across rotations at each alpha level") +
+        theme_bw() +
+        theme(legend.position = "right")
+      save_figure(p_jaccard_alpha, file.path(module2_fig_dir, "jaccard_by_alpha"),
+                  width = 12, height = 5)
 
       cat("Module 2 outputs saved to", module2_dir, "\n\n")
     }
@@ -448,7 +453,7 @@ for (slice in SLICES) {
       scale_fill_manual(values = method_colors, name = "Method") +
       labs(x = "Rotation angle (\u00b0)", y = "Runtime (seconds)",
            title = paste0("Runtime per Angle - All Methods | ", slice, "/", mode)) +
-      theme_bioinformatics() +
+      theme_bw() +
       theme(legend.position = "right")
     save_figure(p_runtime, file.path(module2_fig_dir, "runtime_barplot"),
                 width = 10, height = 6)
