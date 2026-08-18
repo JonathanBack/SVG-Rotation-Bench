@@ -2,11 +2,33 @@
 
 **Benchmarking Rotation Invariance and Performance of Kernel-Based Methods for Spatially Variable Genes (SVGs) Detection**
 
+> **Project status:** active, evolving work toward a full-paper extension. The current codebase expands the original single-slice evaluation to four tissue slices (`anterior1`, `anterior2`, `posterior1`, `posterior2`) and adds a `whole`-transcriptome mode alongside the `simulated` mode. Results are preliminary and may change as the analysis is refined.
+
 ## Overview
 
-Advances in spatially resolved transcriptomics (SRT) require robust computational tools to identify Spatially Variable Genes (SVGs). However, many kernel-based methods exhibit a critical, yet overlooked, technical vulnerability: **rotation variance**. In laboratory practice, tissue sections are randomly positioned on slides, altering the absolute spatial coordinates. Theoretically, the biological signal remains unchanged, but algorithms relying on axis-dependent transformations may produce highly discordant results when the coordinate system is rotated.
+Spatially resolved transcriptomics (SRT) measures gene expression while preserving the spatial coordinates of each observation. The detection of **Spatially Variable Genes (SVGs)** — genes whose expression shows a non-random pattern across the tissue — is the entry point of any SRT analysis: the SVG list feeds every downstream inference (spatial domain identification, co-expression modules, tissue architecture characterisation). A mis-specified SVG list propagates errors through the entire pipeline.
 
-This repository provides a systematic benchmarking framework designed to evaluate how the underlying statistical formulation of kernel-based methods affects rotation invariance, classification accuracy, ranking power, and computational scalability.
+The field now offers dozens of SVG detection methods, but different methods produce markedly different SVG lists on the same data — with disparities of up to two orders of magnitude in the number of genes called — and the researcher has no objective criterion for choosing which method to trust.
+
+This repository provides a systematic benchmarking framework that evaluates five representative kernel-based SVG detection methods along **two independent dimensions of quality**:
+
+1. **Classification performance** — the ability to distinguish spatially variable genes from non-variable ones (false positive rate, sensitivity, confusion matrix).
+2. **Rotation invariance** — the consistency of results when the spatial coordinates are rotated.
+
+The framework runs in two modes: a **`simulated`** mode with a known ground truth (scDesign3-generated synthetic data with a controlled signal gradient) and a **`whole`** mode that runs the rotation benchmark directly on the full, unprocessed real geneset of each slice.
+
+## Background: why rotation invariance matters
+
+In the laboratory, a tissue section is deposited on the slide at an arbitrary orientation. The absolute coordinate system — the `x` and `y` axes of the slide — carries no biological meaning: the biology of the tissue is the same regardless of the angle at which the section was positioned. Yet methods whose statistical formulation depends on the absolute coordinate system can, in principle, produce different results for the same tissue when the spatial coordinates are rotated.
+
+The **central hypothesis** of this work is that methods operating on **relative distances** between spots (neighbour graphs, Euclidean-distance kernels) are rotation-invariant by construction, whereas methods that project coordinates onto **absolute axes** are vulnerable to rotation.
+
+Su & Cui (2025, *Nature Communications*) illustrated this problem on the mouse olfactory bulb: SPARK-X identified 2,321 SVGs in the original orientation, a number that dropped to 548 under a 60° rotation, with only seven genes detected consistently between the 30° and 45° rotations. This repository extends that investigation by:
+
+1. Quantifying rotation invariance under **controlled simulation with a known ground truth** (scDesign3), rather than on real data without a reference.
+2. Evaluating **both dimensions jointly** (invariance and classification calibration), making their independence explicit.
+3. Extending the method panel to the **random-effects regression family** (SpatialDE, nnSVG), previously treated only by theoretical argument.
+4. Scaling the evaluation across **four tissue slices** of the 10x Visium mouse brain dataset, in both simulated and whole-transcriptome modes.
 
 ## Scope and Included Methods
 
