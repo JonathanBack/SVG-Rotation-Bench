@@ -2,26 +2,24 @@
 
 **Benchmarking Rotation Invariance and Performance of Kernel-Based Methods for Spatially Variable Genes (SVGs) Detection**
 
-> **Project status:** active, evolving work toward a full-paper extension. The current codebase expands the original single-slice evaluation to four tissue slices (`anterior1`, `anterior2`, `posterior1`, `posterior2`) and adds a `whole`-transcriptome mode alongside the `simulated` mode. Results are preliminary and may change as the analysis is refined.
-
 ## Overview
 
-Spatially resolved transcriptomics (SRT) measures gene expression while preserving the spatial coordinates of each observation. The detection of **Spatially Variable Genes (SVGs)** — genes whose expression shows a non-random pattern across the tissue — is the entry point of any SRT analysis: the SVG list feeds every downstream inference (spatial domain identification, co-expression modules, tissue architecture characterisation). A mis-specified SVG list propagates errors through the entire pipeline.
+Spatially resolved transcriptomics (SRT) measures gene expression while preserving the spatial coordinates of each observation. The detection of genes whose expression shows a non-random pattern across the tissue, also known as **Spatially Variable Genes (SVGs)**,  is the entry point of any SRT analysis. Therefore, a mis-specified SVG list propagates errors through the entire pipeline.
 
-The field now offers dozens of SVG detection methods, but different methods produce markedly different SVG lists on the same data — with disparities of up to two orders of magnitude in the number of genes called — and the researcher has no objective criterion for choosing which method to trust.
+The field now offers dozens of SVG detection methods, but different methods produce markedly different SVG lists on the same data.
 
-This repository provides a systematic benchmarking framework that evaluates five representative kernel-based SVG detection methods along **two independent dimensions of quality**:
+This repository provides a systematic benchmarking framework that evaluates five representative SVG detection methods along **two independent dimensions of quality**:
 
-1. **Classification performance** — the ability to distinguish spatially variable genes from non-variable ones (false positive rate, sensitivity, confusion matrix).
+1. **Classification performance** — the ability to distinguish spatially variable genes from non-variable ones (e.g. false positive rate and sensitivity).
 2. **Rotation invariance** — the consistency of results when the spatial coordinates are rotated.
 
-The framework runs in two modes: a **`simulated`** mode with a known ground truth (scDesign3-generated synthetic data with a controlled signal gradient) and a **`whole`** mode that runs the rotation benchmark directly on the full, unprocessed real geneset of each slice.
+The framework runs in two modes: a **`simulated`** mode with a known ground truth (scDesign3-generated synthetic data with a controlled signal gradient) and a **`whole`** mode that runs the rotation benchmark directly on the full, real geneset of each slice.
 
 ## Background: why rotation invariance matters
 
-In the laboratory, a tissue section is deposited on the slide at an arbitrary orientation. The absolute coordinate system — the `x` and `y` axes of the slide — carries no biological meaning: the biology of the tissue is the same regardless of the angle at which the section was positioned. Yet methods whose statistical formulation depends on the absolute coordinate system can, in principle, produce different results for the same tissue when the spatial coordinates are rotated.
+The absolute coordinate system (the `x` and `y` axes of the slide) carries no biological meaning: the biology of the tissue is the same regardless of the angle at which the section was positioned. Yet methods whose statistical formulation depends on the absolute coordinate system can, in principle, produce different results for the same tissue when the spatial coordinates are rotated.
 
-The **central hypothesis** of this work is that methods operating on **relative distances** between spots (neighbour graphs, Euclidean-distance kernels) are rotation-invariant by construction, whereas methods that project coordinates onto **absolute axes** are vulnerable to rotation.
+The **central hypothesis** of this work is that methods operating on **relative distances** between spots (neighbor graphs, Euclidean-distance kernels) are rotation-invariant by construction, whereas methods that project coordinates onto **absolute axes** are vulnerable to rotation.
 
 Su & Cui (2025, *Nature Communications*) illustrated this problem on the mouse olfactory bulb: SPARK-X identified 2,321 SVGs in the original orientation, a number that dropped to 548 under a 60° rotation, with only seven genes detected consistently between the 30° and 45° rotations. This repository extends that investigation by:
 
@@ -32,16 +30,18 @@ Su & Cui (2025, *Nature Communications*) illustrated this problem on the mouse o
 
 ## Scope and Included Methods
 
-We benchmark 5 representative kernel-based methods across two main statistical schools:
+We benchmark 5 representative methods across two main statistical approaches:
 
 **1. Dependence Tests** (Evaluating global independence between expression and location):
 - **SPARK-X:** Non-parametric covariance test.
-- **Moran's I:** Spatial autocorrelation statistic (via squidpy).
 - **SMASH:** Generalized non-parametric method incorporating distance-based kernels.
 
 **2. Random-Effect Regression** (Modeling spatial variation as a Gaussian Process):
 - **SpatialDE:** Linear mixed model using standard Gaussian Processes (GP).
 - **nnSVG:** Nearest-Neighbor Gaussian Process (NNGP) for linear scalability.
+
+**3. Baseline** (Rotation invariant by design, graph based)
+- **Moran's I:** Spatial autocorrelation statistic (via squidpy).
 
 ## Pipeline
 
@@ -52,12 +52,12 @@ and two **modes**:
 
 - `simulated` — synthetic counts generated by scDesign3 from a fitted reference
   model, with signal strength controlled by a mixing parameter `alpha`.
-- `whole` — the **full, unprocessed real geneset** of the slice, run through
+- `whole` — the **full, real geneset** of the slice, run through
   the rotation benchmark directly so that rotation-invariance metrics (Jaccard,
   Venn) can be computed on the real data, in parallel to the simulated runs.
 
 Control what runs by editing the `SLICES` and `MODES` vectors at the top of
-each script (RStudio one-click "Source" runs the full selected scope).
+each script.
 
 ```
 src/
@@ -71,8 +71,8 @@ src/
 │       └── figures/                    # Diagnostic plots (.png, .pdf)
 ├── 02_rotation/
 │   ├── scripts/
-│   │   ├── generate_rotated_locations.R
-│   │   ├── convert_to_anndata.py
+│   │   ├── generate_rotated_locations.R # rotates coordinates
+│   │   ├── convert_to_anndata.py       # converts data to .h5ad
 │   │   └── sanity_rotation_plots.py    # optional rotation sanity diagnostics
 │   └── outputs/{slice}/{mode}/
 │       ├── locations/                  # rotated_locations_{angle}.csv
@@ -111,8 +111,8 @@ The R-based methods and metrics require packages from both **CRAN** and **Biocon
 
 ```r
 install.packages(c(
-  "ggplot2", "reshape2", "RColorBrewer", "patchwork",
-  "cowplot", "dplyr", "scales", "MASS", "ggVennDiagram"
+  "ggplot2", "reshape2", "patchwork", "Seurat",
+  "cowplot", "dplyr", "scales", "MASS", "ggvenn"
 ))
 ```
 
@@ -126,12 +126,6 @@ BiocManager::install(c(
   "SingleCellExperiment", "SpatialExperiment", "scran",
   "nnSVG", "anndata"
 ))
-```
-
-#### Seurat (CRAN / remotes)
-
-```r
-install.packages("Seurat")
 ```
 
 #### SeuratData (CRAN)
@@ -161,8 +155,6 @@ if (!requireNamespace("devtools", quietly = TRUE))
 devtools::install_github("xzhoulab/SPARK")
 ```
 
-> **Note:** `SPARK::sparkx()` is the function used in the benchmark. The package may have additional system dependencies (e.g., a working C++ compiler for Rcpp).
-> 
 #### scDesign3 (GitHub)
 
 scDesign3 is not available on CRAN or Bioconductor. Install from the authors' GitHub repository:
@@ -183,52 +175,12 @@ Clone the SMASH repository into the tools directory:
 
 ```bash
 cd src/03_benchmark/tools/
-git clone https://github.com/your-org/SMASH.git  # Replace with actual URL
+git clone https://github.com/sealx017/SMASH-package.git 
 ```
-
-SMASH is imported directly from this local path by `run_smash.py`. It requires `numpy`, `scipy`, `pandas`, `scikit-learn`, and `tqdm` (all provided by the conda environment).
-
-> **Compatibility note:** SMASH uses the deprecated BLAS function `sgemm` which fails with float64 arrays on modern scipy. The benchmark script (`run_smash.py`) includes a monkey-patch to fix this issue automatically.
 
 ### 4. SpatialDE compatibility patch
 
 SpatialDE is unmaintained and incompatible with `scipy >= 1.12` (removed `scipy.misc.derivative` and `scipy.arange`). The benchmark script (`run_spatialde.py`) includes runtime compatibility patches to address these issues. No manual intervention is required.
-
-### 5. Full dependency summary
-
-| Package | Source | Used by | Notes |
-|---------|--------|---------|-------|
-| Python `numpy` | conda | All Python scripts | |
-| Python `scipy` | conda | SpatialDE, SMASH | |
-| Python `pandas` | conda | All Python scripts | |
-| Python `matplotlib` | conda | SMASH | |
-| Python `h5py` | conda | anndata | |
-| Python `scikit-learn` | conda | SMASH | |
-| Python `scanpy` | conda | Moran's I, SpatialDE, SMASH | |
-| Python `squidpy` | conda | Moran's I | |
-| Python `anndata` | conda | All Python scripts | |
-| Python `statsmodels` | conda | SMASH (FDR correction) | |
-| Python `tqdm` | conda | SMASH | |
-| Python `SpatialDE` | pip | SpatialDE | Unmaintained; patched at runtime |
-| Python `NaiveDE` | pip | SpatialDE | Companion to SpatialDE |
-| R `Seurat` | CRAN | Simulation | |
-| R `SeuratData` | CRAN | Simulation | Provides `stxBrain` reference dataset (`InstallData("stxBrain")`) |
-| R `SingleCellExperiment` | Bioc | Simulation, nnSVG | |
-| R `SpatialExperiment` | Bioc | nnSVG | |
-| R `scran` | Bioc | nnSVG | |
-| R `nnSVG` | Bioc | nnSVG | |
-| R `scDesign3` | Bioc | Simulation | |
-| R `anndata` (R pkg) | Bioc | nnSVG | R interface to .h5ad files |
-| R `SPARK` | GitHub | SPARK-X | `devtools::install_github("xzhoulab/SPARK")` |
-| R `ggplot2` | CRAN | Metrics, simulation | |
-| R `reshape2` | CRAN | Metrics | |
-| R `RColorBrewer` | CRAN | Metrics | |
-| R `patchwork` | CRAN | Metrics | |
-| R `cowplot` | CRAN | Simulation | |
-| R `dplyr` | CRAN | Simulation | |
-| R `scales` | CRAN | Simulation | |
-| R `MASS` | CRAN | SPARK-X | |
-| R `ggVennDiagram` | CRAN | Metrics (optional) | For Venn diagrams; skip if unavailable |
 
 ## Stage 1: Simulation (`src/01_simulation/`)
 
@@ -236,33 +188,28 @@ Synthetic spatial transcriptomics data is generated using `scDesign3`, fitted pe
 
 The full pipeline runs in two modes:
 
-- **`simulated` mode** (`run_scdesign3_simulation.R`): the reference slice is prefiltered to its top 200 SVGs by Moran's I (Seurat); scDesign3 fits a GP-smoothed negative-binomial marginal plus a Gaussian copula; the top 50 genes by deviance explained are kept for a second fit; finally the alpha sweep blends the spatial mean with a shuffled (non-spatial) mean to produce `counts.csv` (1050 features: 50 genes x 21 alpha levels) and `location.csv`.
-- **`whole` mode** (`export_whole_dataset.R`): the unprocessed real counts for the full geneset are exported verbatim as `counts.csv` (plain gene symbols, no `_alpha` suffix) and `location.csv`, so the same downstream rotation/benchmark/metrics scripts work uniformly across both modes.
-
-- **Marginal Modeling:** Learns the true spatial mean $\mu_s(s)$ using a 2D Gaussian Process.
+- **Marginal Modeling:** Learns the true spatial mean $\mu_s(s)$ using a GAM with Gaussian Process smoother.
 - **Joint Modeling:** Preserves gene-gene correlation using a Gaussian Copula.
-- **Ground Truth Generation (`simulated` only):** True SVGs are defined by mixing the spatial signal with a randomized null signal $\mu_{ns}(s)$ using a mixing parameter $\alpha$:  
+- **Ground Truth Generation:** True SVGs are defined by mixing the spatial signal with a randomized null signal $\mu_{ns}(s)$ using a mixing parameter $\alpha$:  
   $\mu(s) = \alpha \cdot \mu_s(s) + (1 - \alpha) \cdot \mu_{ns}(s)$
 
 **Scripts:**
 - `scripts/run_scdesign3_simulation.R` — Per slice: loads `stxBrain` via SeuratData, pre-filters to top 200 SVGs (Moran's I), fits scDesign3 (GP marginal models + Gaussian copula), selects the top 50 genes by deviance explained, runs the alpha sweep (0.00-1.00 in 0.05 steps), and writes `counts.csv`/`location.csv` to `outputs/scDesign3/{slice}/simulated/data/`. Also produces one real-vs-sim sanity plot per slice.
-- `scripts/export_whole_dataset.R` — Per slice: exports the full unprocessed `stxBrain` counts and spatial coordinates to `outputs/scDesign3/{slice}/whole/data/` so the benchmark can be run on the complete real geneset.
+- `scripts/export_whole_dataset.R` — Per slice: exports the full `stxBrain` counts and spatial coordinates to `outputs/scDesign3/{slice}/whole/data/` so the benchmark can be run on the complete real geneset.
 - `scripts/sanity_simulation_plots.R` — Optional standalone diagnostic: plots one selected gene (default `Mbp`) across alpha levels {1, 0.6, 0.2, 0} for each slice.
 
 ## Stage 2: Rotation (`src/02_rotation/`)
 
-The generated count matrix is frozen. To test geometrical robustness, the original spatial coordinates matrix $S \in \mathbb{R}^{n \times 2}$ is multiplied by an orthogonal rotation matrix $R$ at specific angles $\theta \in \{0^\circ, 30^\circ, 45^\circ, 60^\circ\}$:
+The generated count matrix is frozen. To test rotation invariance, the original spatial coordinates matrix $S \in \mathbb{R}^{n \times 2}$ is multiplied by a rotation matrix $R$ at specific angles $\theta \in \{0^\circ, 30^\circ, 45^\circ, 60^\circ\}$:
 
 $$S^* = S R^T$$
 
-Where $R$ is the standard 2D rotation matrix:
+Where $R$ is the standard rotation matrix:
 
 $$R = \begin{bmatrix}
 \cos(\frac{\theta}{180}\pi) & -\sin(\frac{\theta}{180}\pi) \\
 \sin(\frac{\theta}{180}\pi) &  \cos(\frac{\theta}{180}\pi)
 \end{bmatrix}$$
-
-Rotation is centered on the tissue's center of mass to preserve the overall spatial distribution.
 
 **Scripts:**
 - `scripts/generate_rotated_locations.R` — Reads `outputs/scDesign3/{slice}/{mode}/data/location.csv` and outputs per-angle rotated coordinate files to `outputs/{slice}/{mode}/locations/`.
@@ -296,4 +243,4 @@ Raw benchmark outputs from Stage 3 are evaluated per (slice, mode). Metrics are 
 **Runtime** barplot (both modes).
 
 **Scripts:**
-- `scripts/compute_all_metrics.R` — Iterates over the selected slices and modes, reads `outputs/{slice}/{mode}/{method}/scdesign3_angle{angle}_results.rds`, computes the metrics above, and writes CSVs + publication-ready figures (PNG 300dpi + PDF) to `outputs/{slice}/{mode}/{module1_rotation|module2_performance}/`. Module 2 is skipped automatically when `mode == "whole"`.
+- `scripts/compute_all_metrics.R` — Iterates over the selected slices and modes, reads `outputs/{slice}/{mode}/{method}/scdesign3_angle{angle}_results.rds`, computes the metrics above, and writes CSVs + figures (PNG 300dpi + PDF) to `outputs/{slice}/{mode}/{module1_rotation|module2_performance}/`. Module 2 is skipped automatically when `mode == "whole"`.
