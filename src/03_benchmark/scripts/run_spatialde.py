@@ -123,6 +123,17 @@ for slice_name in SLICES:
 
             # --- Load AnnData with rotated spatial coordinates ---
             adata = sc.read_h5ad(h5ad_path)
+
+            # --- Filter zero-count genes (harmonize gene universe across methods) ---
+            # Without this, SpatialDE fits a degenerate GP to all-zero genes,
+            # producing a shared FSV artifact that is rotation-unstable and
+            # corrupts the top-K ranking (e.g. 765 zero-count genes flood the
+            # top-2000 at 30 degrees).
+            counts_mat = adata.layers["counts"]
+            if hasattr(counts_mat, "toarray"):
+                counts_mat = counts_mat.toarray()
+            adata = adata[:, counts_mat.sum(axis=0) > 0].copy()
+
             sc.pp.calculate_qc_metrics(adata, inplace=True, percent_top=[10])
 
             # Extract count matrix and total counts per cell

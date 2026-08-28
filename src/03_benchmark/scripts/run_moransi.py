@@ -92,6 +92,12 @@ if __name__ == "__main__":
                 # --- Load AnnData with rotated spatial coordinates ---
                 adata = sc.read_h5ad(h5ad_path)
 
+                # --- Filter zero-count genes (harmonize gene universe across methods) ---
+                counts_mat = adata.layers["counts"]
+                if hasattr(counts_mat, "toarray"):
+                    counts_mat = counts_mat.toarray()
+                adata = adata[:, counts_mat.sum(axis=0) > 0].copy()
+
                 # Build spatial neighbor graph using Delaunay triangulation
                 sq.gr.spatial_neighbors_delaunay(adata)
 

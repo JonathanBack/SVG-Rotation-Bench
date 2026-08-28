@@ -107,6 +107,12 @@ for slice_name in SLICES:
             # --- Load AnnData with rotated spatial coordinates ---
             adata = sc.read_h5ad(h5ad_path)
 
+            # --- Filter zero-count genes (harmonize gene universe across methods) ---
+            counts_mat = adata.layers["counts"]
+            if hasattr(counts_mat, "toarray"):
+                counts_mat = counts_mat.toarray()
+            adata = adata[:, counts_mat.sum(axis=0) > 0].copy()
+
             # Extract raw counts (cells x genes) from the stored layer
             counts_mat = adata.layers["counts"]
             if hasattr(counts_mat, "toarray"):

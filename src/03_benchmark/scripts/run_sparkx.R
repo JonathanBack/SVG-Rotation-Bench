@@ -47,6 +47,11 @@ for (slice in SLICES) {
     counts <- as.matrix(counts)
     counts <- counts[!duplicated(rownames(counts)), ]
 
+    # Filter zero-count genes (harmonize gene universe across all methods).
+    # SPARK-X has an internal filter that drops zero-count genes; this makes
+    # it explicit so all methods run on the identical gene set.
+    counts <- counts[rowSums(counts) > 0, , drop = FALSE]
+
     for (angle in angles_degrees) {
       rds_file <- file.path(output_dir, paste0("scdesign3_angle", angle, "_results.rds"))
       runtime_file <- file.path(output_dir, paste0("scdesign3_angle", angle, "_runtime.csv"))
