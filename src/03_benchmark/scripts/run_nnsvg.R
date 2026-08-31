@@ -46,11 +46,6 @@ for (slice in SLICES) {
     counts <- read.csv(counts_file, row.names = 1, check.names = FALSE)
     counts <- as.matrix(counts)
 
-    # Filter zero-count genes (harmonize gene universe across all methods).
-    # Removes the nnSVG built-in filter_genes() call below — all methods now
-    # run on the same >0-count gene set (~20,467 genes for stxBrain).
-    counts <- counts[rowSums(counts) > 0, , drop = FALSE]
-
     # Minimal row metadata
     row_data <- data.frame(gene_id = rownames(counts))
 
@@ -95,13 +90,14 @@ for (slice in SLICES) {
         spatialCoordsNames = c("x", "y")
       )
 
-      # Normalize: compute size factors, then log-normalize
+      # remove zero-count genes to harmonize the gene universe across all benchmark methods.
+      spe <- filter_genes(spe, filter_genes_ncounts = 1,filter_genes_pcspots = 0.01, filter_mito = FALSE)
+
+            # Normalize: compute size factors, then log-normalize
       spe <- computeLibraryFactors(spe)
       spe <- logNormCounts(spe)
-
-      # NOTE: filter_genes() removed — zero-count genes already filtered above
-      # to harmonize the gene universe across all benchmark methods.
-
+      
+      
       # --- Run nnSVG ---
       set.seed(2024)
       t_start <- proc.time()

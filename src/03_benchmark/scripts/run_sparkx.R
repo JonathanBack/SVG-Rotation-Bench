@@ -74,7 +74,7 @@ for (slice in SLICES) {
 
       # --- Run SPARK-X with mixture model option ---
       t_start <- proc.time()
-      result <- sparkx(counts, locs, numCores = 1, option = "mixture")
+      result <- sparkx(counts, locs, numCores = 5, option = "mixture")
       elapsed <- proc.time() - t_start
 
       saveRDS(result, rds_file)

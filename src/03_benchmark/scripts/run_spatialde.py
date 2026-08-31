@@ -125,10 +125,6 @@ for slice_name in SLICES:
             adata = sc.read_h5ad(h5ad_path)
 
             # --- Filter zero-count genes (harmonize gene universe across methods) ---
-            # Without this, SpatialDE fits a degenerate GP to all-zero genes,
-            # producing a shared FSV artifact that is rotation-unstable and
-            # corrupts the top-K ranking (e.g. 765 zero-count genes flood the
-            # top-2000 at 30 degrees).
             counts_mat = adata.layers["counts"]
             if hasattr(counts_mat, "toarray"):
                 counts_mat = counts_mat.toarray()

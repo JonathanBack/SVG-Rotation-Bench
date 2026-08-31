@@ -101,10 +101,10 @@ if __name__ == "__main__":
                 # Build spatial neighbor graph using Delaunay triangulation
                 sq.gr.spatial_neighbors_delaunay(adata)
 
-                # --- Run Moran's I with 100 permutations, parallelized over 10 cores
+                # --- Run Moran's I with 500 permutations, parallelized over 10 cores
                 t_start = time.time()
                 sq.gr.spatial_autocorr(
-                    adata, mode="moran", n_perms=100, n_jobs=10,
+                    adata, mode="moran", n_perms=500, n_jobs=10,
                     genes=adata.var_names
                 )
                 elapsed = time.time() - t_start
