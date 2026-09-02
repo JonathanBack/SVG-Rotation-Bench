@@ -13,6 +13,7 @@
 library(SpatialExperiment)
 library(scran)
 library(nnSVG)
+library(BiocParallel)
 
 # --- Select which slices and modes to run ---
 SLICES <- c("anterior1", "anterior2", "posterior1", "posterior2")
@@ -47,7 +48,7 @@ for (slice in SLICES) {
     counts <- as.matrix(counts)
 
     # Minimal row metadata
-    row_data <- data.frame(gene_id = rownames(counts))
+    row_data <- data.frame(gene_name = rownames(counts))
 
     message("\n=== nnSVG: ", slice, " / ", mode, " ===")
 
@@ -91,7 +92,7 @@ for (slice in SLICES) {
       )
 
       # remove zero-count genes to harmonize the gene universe across all benchmark methods.
-      spe <- filter_genes(spe, filter_genes_ncounts = 1,filter_genes_pcspots = 0.01, filter_mito = FALSE)
+      spe <- filter_genes(spe, filter_genes_ncounts = 1,filter_genes_pcspots = 1, filter_mito = FALSE)
 
             # Normalize: compute size factors, then log-normalize
       spe <- computeLibraryFactors(spe)
