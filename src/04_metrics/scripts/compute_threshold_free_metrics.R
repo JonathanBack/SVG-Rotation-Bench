@@ -68,14 +68,6 @@ angles  <- c(0, 30, 45, 60)
 pairs_all <- list(c("0", "30"), c("0", "45"), c("0", "60"),
                   c("30", "45"), c("30", "60"), c("45", "60"))
 
-# --- Angle colors for PR curves and scatter plots ---
-angle_colors <- c(
-  "0"  = "#000000",
-  "30" = "#D55E00",
-  "45" = "#0072B2",
-  "60" = "#009E73"
-)
-
 # --- Helper: save both PNG (cairo) and PDF (reused from compute_all_metrics.R) ---
 save_figure <- function(plot, filename_base, width, height, dpi = 300) {
   ggsave(paste0(filename_base, ".png"), plot, width = width, height = height,
@@ -94,9 +86,6 @@ jaccard_index <- function(set_a, set_b) {
 # --- Containers for cross-slice aggregation ---
 all_threshold_free <- list()
 all_topk_jaccard   <- list()
-
-# --- Container for PR curve data (simulated mode, per-slice) ---
-all_pr_curves <- list()
 
 # ==============================================================================
 # MAIN LOOP OVER SLICES AND MODES
@@ -236,11 +225,10 @@ for (slice in SLICES) {
           score <- sub$score
 
           # auPRC via PRROC::pr.curve (inline, no wrapper).
-          # curve = TRUE so the PR curve coordinates are collected for the
-          # per-slice PR curve panel below.
+          # scores.class0 = positive class, scores.class1 = negative class.
           pr <- pr.curve(scores.class0 = score[pos],
                          scores.class1 = score[!pos],
-                         curve = TRUE)
+                         curve = FALSE)
           auprc <- pr$auc.integral
 
           # Kendall tau vs continuous alpha (inline, no wrapper).
@@ -266,81 +254,6 @@ for (slice in SLICES) {
         cat("\n")
 
         all_threshold_free[[length(all_threshold_free) + 1]] <- threshold_free
-      }
-
-      # --- Collect PR curve coordinates for the per-slice panel ---
-      pr_curve_list <- do.call(rbind, lapply(tools, function(tool) {
-        do.call(rbind, lapply(angles, function(angle) {
-          sub <- all_data[all_data$tool == tool & all_data$angle == angle, ]
-          if (nrow(sub) == 0) return(NULL)
-          pos <- sub$alpha > 0
-          pr <- pr.curve(scores.class0 = sub$score[pos],
-                         scores.class1 = sub$score[!pos],
-                         curve = TRUE)
-          if (is.null(pr$curve)) return(NULL)
-          data.frame(
-            tool = tool, tool_label = toupper(tool),
-            angle = as.character(angle),
-            recall = pr$curve[, 1],
-            precision = pr$curve[, 2],
-            stringsAsFactors = FALSE
-          )
-        }))
-      }))
-
-      if (!is.null(pr_curve_list) && nrow(pr_curve_list) > 0) {
-        pr_curve_list$angle <- factor(pr_curve_list$angle, levels = c("0","30","45","60"))
-
-        p_prcurves <- ggplot(pr_curve_list,
-                             aes(x = recall, y = precision, color = angle)) +
-          geom_path(linewidth = 0.8) +
-          facet_wrap(~ tool_label, ncol = 5) +
-          scale_color_manual(values = angle_colors, name = "Angle (\u00b0)") +
-          scale_x_continuous(limits = c(0, 1)) +
-          scale_y_continuous(limits = c(0, 1)) +
-          labs(x = "Recall", y = "Precision",
-               title = paste0("Precision-Recall Curves Across Rotations | ", slice),
-               subtitle = "Positives = alpha > 0 | Overlapping curves = rotation invariance") +
-          theme_bw() +
-          theme(strip.text = element_text(face = "bold", size = 11),
-                legend.position = "bottom")
-        save_figure(p_prcurves, file.path(module_fig_dir, "prcurves_panel"),
-                    width = 16, height = 5)
-      }
-
-      # --- Kendall scatter panel: rank(score) vs alpha, faceted by method ---
-      # Ranks computed within each tool x angle group; loess trend per angle.
-      scatter_data <- do.call(rbind, lapply(tools, function(tool) {
-        do.call(rbind, lapply(angles, function(angle) {
-          sub <- all_data[all_data$tool == tool & all_data$angle == angle, ]
-          if (nrow(sub) == 0) return(NULL)
-          data.frame(
-            tool = tool, tool_label = toupper(tool),
-            angle = as.character(angle),
-            alpha = sub$alpha,
-            rank_score = rank(sub$score, ties.method = "average"),
-            stringsAsFactors = FALSE
-          )
-        }))
-      }))
-
-      if (!is.null(scatter_data) && nrow(scatter_data) > 0) {
-        scatter_data$angle <- factor(scatter_data$angle, levels = c("0","30","45","60"))
-
-        p_scatter <- ggplot(scatter_data,
-                            aes(x = alpha, y = rank_score, color = angle)) +
-          geom_point(alpha = 0.3, size = 0.8) +
-          geom_smooth(method = "loess", se = FALSE, linewidth = 1) +
-          facet_wrap(~ tool_label, ncol = 5) +
-          scale_color_manual(values = angle_colors, name = "Angle (\u00b0)") +
-          labs(x = "Signal strength (alpha)", y = "Rank(score)",
-               title = paste0("Kendall \u03c4 Scatter: Rank vs Signal Gradient | ", slice),
-               subtitle = "Monotonic step-up = good ordinal recovery | Angle overlap = invariance") +
-          theme_bw() +
-          theme(strip.text = element_text(face = "bold", size = 11),
-                legend.position = "bottom")
-        save_figure(p_scatter, file.path(module_fig_dir, "kendall_scatter_panel"),
-                    width = 16, height = 5)
       }
 
       cat("Module 2 (threshold-free) outputs saved to", module_dir, "\n\n")
@@ -407,9 +320,8 @@ for (slice in SLICES) {
           geom_tile(color = "white", linewidth = 0.8) +
           geom_text(aes(label = sprintf("%.3f", jaccard)),
                     size = 3.5, fontface = "bold") +
-          scale_fill_gradient2(low = "#D73027", mid = "#FFFFCC", high = "#1A9850",
-                               midpoint = 0.95, limits = c(0, 1),
-                               name = "Jaccard index") +
+          scale_fill_gradient(low = "#F7FCF5", high = "#00441B",
+                              name = "Jaccard index") +
           labs(x = "Angle pair", y = "Method",
                title = paste0("Top-", TOP_K, " Set Overlap: Jaccard Across Angle Pairs | ", slice),
                subtitle = paste0("K = ", TOP_K,
@@ -508,8 +420,7 @@ if (length(all_threshold_free) > 0) {
                          aes(x = factor(angle), y = tool_label, fill = auPRC)) +
     geom_tile(color = "white", linewidth = 0.8) +
     geom_text(aes(label = sprintf("%.3f", auPRC)), size = 3, fontface = "bold") +
-    scale_fill_gradient2(low = "#D73027", mid = "#FFFFBF", high = "#1A9850",
-                         midpoint = 0.95, limits = c(0.9, 1), name = "auPRC") +
+    scale_fill_gradient(low = "#F7FCF5", high = "#00441B", name = "auPRC") +
     facet_wrap(~ slice, nrow = 1) +
     labs(x = "Rotation angle (\u00b0)", y = "Method",
          title = "auPRC Across Rotations and Slices (Simulated)",
@@ -525,8 +436,7 @@ if (length(all_threshold_free) > 0) {
                            aes(x = factor(angle), y = tool_label, fill = kendall_tau)) +
     geom_tile(color = "white", linewidth = 0.8) +
     geom_text(aes(label = sprintf("%.3f", kendall_tau)), size = 3, fontface = "bold") +
-    scale_fill_gradient2(low = "#762A83", mid = "#F7F7F7", high = "#1B7837",
-                         midpoint = 0, limits = c(-1, 1), name = "Kendall \u03c4") +
+    scale_fill_gradient(low = "#F7FCF5", high = "#00441B", name = "Kendall \u03c4") +
     facet_wrap(~ slice, nrow = 1) +
     labs(x = "Rotation angle (\u00b0)", y = "Method",
          title = "Kendall \u03c4 vs Signal Gradient Across Rotations and Slices (Simulated)",
@@ -552,8 +462,7 @@ if (length(all_topk_jaccard) > 0) {
                            aes(x = pair_label, y = tool_label, fill = jaccard)) +
     geom_tile(color = "white", linewidth = 0.8) +
     geom_text(aes(label = sprintf("%.3f", jaccard)), size = 3, fontface = "bold") +
-    scale_fill_gradient2(low = "#D73027", mid = "#FFFFCC", high = "#1A9850",
-                         midpoint = 0.95, limits = c(0, 1), name = "Jaccard") +
+    scale_fill_gradient(low = "#F7FCF5", high = "#00441B", name = "Jaccard") +
     facet_wrap(~ slice, nrow = 1) +
     labs(x = "Angle pair", y = "Method",
          title = paste0("Top-", TOP_K, " Jaccard Across Rotations and Slices (Whole)"),

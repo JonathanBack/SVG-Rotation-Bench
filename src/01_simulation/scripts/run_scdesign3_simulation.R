@@ -2,7 +2,8 @@
 # run_scdesign3_simulation.R
 # Fits scDesign3 to each stxBrain slice (anterior1/2, posterior1/2), then
 # generates the alpha-sweep simulated counts (alpha = 0, 0.05, ..., 1.0) by
-# blending the fitted spatial mean with a shuffled (non-spatial) mean matrix.
+# blending the fitted spatial mean with a shuffled (non-spatial) mean matrix,
+# PLUS a fixed diverse null background of permuted real genes.
 #
 # Per slice:
 #   1. Load stxBrain slice via SeuratData; SCTransform + Moran's I (top 200)
@@ -11,9 +12,27 @@
 #   4. Second pass on the 50 genes
 #   5. Sanity plot: Mbp real vs simulated at 100% signal
 #   6. Alpha sweep -> stacked counts matrix with "gene_alpha" rownames
-#   7. Save counts.csv + location.csv
+#   7. Null background: N_NULL real genes (expression-stratified to match the
+#      50 SVGs' total-count distribution), each permuted across spots
+#      independently -> "NULL_gene" features, stacked after the alpha sweep
+#   8. Sanity plot: null genes real vs permuted (spatial pattern destroyed)
+#   9. Save counts.csv + location.csv
 #
-# Edit SLICES below to control which slices are processed.
+# Design notes:
+#   - The null background fixes the negative-class deficiency of the previous
+#     all-in-one matrix (only 50 shuffled copies): positives (alpha > 0,
+#     1000 features) vs negatives (alpha = 0 copies UNION NULL_ background,
+#     50 + N_NULL) gives a balanced, diverse, expression-controlled negative
+#     class for auPRC.
+#   - Expression stratification controls the expression-level confound
+#     (Chen et al. 2024: SVG scores track expression level).
+#   - The 50 alpha = 0 copies are KEPT: they are the per-gene gradient
+#     endpoints and expression-matched hard negatives.
+#   - The null step uses its own seed AFTER the alpha sweep, so the RNG stream
+#     feeding simu_new is untouched and alpha-feature counts remain identical
+#     to previous runs.
+#
+# Edit SLICES / N_NULL below to control scope.
 # Output: src/01_simulation/outputs/scDesign3/{slice}/simulated/data/{counts,location}.csv
 # ==============================================================================
 
@@ -28,6 +47,9 @@ library(dplyr)
 
 # --- Select which slices to run (edit these vectors to control scope) ---
 SLICES <- c("anterior1", "anterior2", "posterior1", "posterior2")
+
+# --- Fixed null-background size (expression-stratified permuted real genes) ---
+N_NULL <- 1000
 
 # --- Setup: resolve project root ---
 project_root <- normalizePath(getwd(), winslash = "/", mustWork = TRUE)
@@ -106,6 +128,10 @@ for (slice in SLICES) {
     selection.method = "moransi"
   )
   top.features <- head(SpatiallyVariableFeatures(seu, method = "moransi"), 200)
+
+  # Retain the FULL raw counts matrix (all genes x spots) BEFORE subsetting:
+  # this is the pool from which the null-background genes are sampled (step 7).
+  full_counts_mat <- GetAssayData(seu, assay = "Spatial", layer = "counts")
 
   # Subset the Seurat object to the top 200 SVGs
   seu <- seu[top.features, ]
@@ -299,6 +325,75 @@ for (slice in SLICES) {
     rownames(sim_count) <- paste0(rownames(sim_count), "_", alpha)
     sim_count
   }) %>% do.call(rbind, .)
+
+  # ----------------------------------------------------------------------------
+  # STEP 7.5: Fixed diverse null background (N_NULL permuted real genes)
+  # ----------------------------------------------------------------------------
+  # The N_NULL highest-expressed background genes (excluding the 50 SVGs) --
+  # the closest available expression match to the SVG panel, controlling the
+  # expression-level confound (Chen et al. 2024: SVG scores track expression).
+  # Perfect matching is impossible (only ~250 pool genes reach the SVG median
+  # expression), but this is far stricter than published protocols (SRTsim
+  # used median-expression nulls). Each gene's counts are permuted across
+  # spots independently: real marginals (mean, variance, dropout) preserved,
+  # spatial signal destroyed by construction. Named "NULL_gene" so downstream
+  # parsers tag them as null (non-numeric alpha suffix).
+  #
+  # NOTE: own seed, set AFTER the alpha sweep -- the RNG stream feeding
+  # simu_new above is untouched, so alpha-feature counts are identical to
+  # previous runs.
+  # ----------------------------------------------------------------------------
+
+  message("  Generating null background (", N_NULL, " permuted real genes)...")
+
+  set.seed(2025)
+
+  full_counts <- as.matrix(full_counts_mat)
+  pool_genes  <- setdiff(
+    rownames(full_counts)[rowSums(full_counts) > 0],
+    sel_genes
+  )
+  pool_totals <- rowSums(full_counts[pool_genes, , drop = FALSE])
+  null_genes  <- names(sort(pool_totals, decreasing = TRUE))[seq_len(N_NULL)]
+
+  null_counts_raw <- full_counts[null_genes, , drop = FALSE]
+  # Per-gene independent spot permutation: destroys spatial autocorrelation,
+  # preserves the marginal count distribution exactly.
+  null_counts <- t(apply(null_counts_raw, 1, sample))
+  colnames(null_counts) <- colnames(full_counts)
+
+  null_export <- null_counts
+  rownames(null_export) <- paste0("NULL_", null_genes)
+
+  count <- rbind(count, null_export)
+
+  message("  Null background: ", length(null_genes),
+          " highest-expressed background genes, spot-permuted")
+
+  # ----------------------------------------------------------------------------
+  # STEP 7.6: Sanity plot - null genes real vs permuted
+  # ----------------------------------------------------------------------------
+
+  null_sanity_genes <- head(null_genes, 2)
+  sce_null_orig <- SingleCellExperiment(
+    list(counts = null_counts_raw[null_sanity_genes, , drop = FALSE]),
+    colData = df_loc
+  )
+  sce_null_perm <- SingleCellExperiment(
+    list(counts = null_counts[null_sanity_genes, , drop = FALSE]),
+    colData = df_loc
+  )
+
+  null_plots <- lapply(null_sanity_genes, function(g) {
+    p1 <- plot_exp(sce_null_orig, gene = g, pt_size = 1.2) +
+      ggtitle(paste0(g, ": real (possibly spatial)"))
+    p2 <- plot_exp(sce_null_perm, gene = g, pt_size = 1.2) +
+      ggtitle(paste0(g, ": permuted (null)"))
+    p1 + p2
+  })
+  save_plot(plot_grid(plotlist = null_plots, ncol = 1),
+            file.path(sim_fig_dir, "sanity_null_permutation"),
+            width = 10, height = 4 * length(null_plots))
 
   # ----------------------------------------------------------------------------
   # STEP 8: Export counts and location matrices
